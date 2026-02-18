@@ -1,67 +1,79 @@
 # 📘 Chapter 1: Core IAM Concepts & Architecture
 
-**Focus:** Building the architectural foundation of Identity and Access Management (IAM). Moving beyond simple "login pages" to understanding the enterprise security perimeter.
+**Focus:** Understanding the foundations of Identity and Access Management (IAM). We go beyond “login pages” to see how IAM protects the enterprise in a distributed environment.
 
-> **Scenario Context:** Throughout this chapter, we use **"MoneyGuard"**, a hypothetical Global FinBank enterprise, to illustrate how these concepts apply in a regulated, distributed environment (On-Premise + Cloud).
+> **Scenario Context:** In this chapter, we use **"MoneyGuard"**, a fictional global bank, to show how IAM works in a real-world environment with both on-premise and cloud systems.
 
 ---
 
 ## 📂 Topic Index
 
 ### [01_Intro.md](./01_Intro.md) | What is IAM?
-* **Concept:** Understanding IAM as the "New Security Perimeter."
-* **Key Takeaway:** Identity is the control plane. In a distributed world (Cloud/Remote), firewalls aren't enough; we must secure the *who* (Identity) rather than just the *where* (Network).
-* **Enterprise Shift:** Moving from Siloed Identities (separate user DBs per app) to Centralized Identity Management.
+
+* **Concept:** IAM is the **new security perimeter**. Instead of just securing networks, we secure *who* can access what.
+* **Key Takeaway:** Identity is the control plane. Firewalls alone aren’t enough in a cloud/remote world.
+* **Enterprise Shift:** From siloed identities (separate accounts per app) to **centralized identity management**.
 
 ### [02_AAA_Framework.md](./02_AAA_Framework.md) | The Holy Trinity of Security
-* **Authentication (AuthN):** "Who are you?" (Verifying the Identity/Principal).
-* **Authorization (AuthZ):** "What can you do?" (Verifying Permissions/Scopes).
-* **Accounting (Auditing):** "What did you do?" (Non-repudiation & Compliance).
-* **Critical Distinction:** AuthN creates the token; AuthZ evaluates the token.
+
+* **Authentication (AuthN):** *Who are you?* — Verifying the user’s identity.
+* **Authorization (AuthZ):** *What can you do?* — Checking permissions or scopes.
+* **Accounting (Auditing):** *What did you do?* — Tracking actions for compliance.
+* **Critical Distinction:** AuthN issues the token; AuthZ decides what the token allows.
 
 ### [03_AccessControlModels.md](./03_AccessControlModels.md) | RBAC, ABAC, & PBAC
-* **RBAC (Role-Based):** Assigning permissions to static Roles (e.g., "Teller"). Good for coarse-grained access.
-* **ABAC (Attribute-Based):** Policies based on User, Resource, and Environment attributes (e.g., "Teller" + "Time=9am" + "Location=Office").
-* **PBAC (Policy-Based):** Logic-driven authorization using centralized policy engines (e.g., OPA).
-* **Evolution:** Start with RBAC; layer ABAC/PBAC for complex "MoneyGuard" scenarios.
 
-### [04_Principle_of_Least_Privilege_(PoLP).md](./04_Principle_of_Least_Privilege_(PoLP).md) | Security Hardening
-* **The Rule:** Users/Services should have the *exact* minimum access required, and only for the time needed.
-* **Implementation:** Moving from "Standing Access" (Permanent Admin) to "Just-In-Time (JIT) Access" (Temporary Admin).
-* **Outcome:** Minimizes the "Blast Radius" if an identity is compromised.
+* **RBAC (Role-Based Access Control):** Permissions based on roles (e.g., “Teller”). Good for basic, broad access control.
+* **ABAC (Attribute-Based Access Control):** Permissions based on attributes (e.g., role + location + time of day).
+* **PBAC (Policy-Based Access Control):** Centralized, rule-based authorization (e.g., OPA engine).
+* **Evolution:** Start with RBAC; add ABAC/PBAC for complex scenarios at **MoneyGuard**.
+
+### [04_Principle_of_Least_Privilege_(PoLP).md](./04_Principle_of_Least_Privilege_%28PoLP%29.md) | Security Hardening
+
+* **Rule:** Give users or services only the access they need—and only for the time they need it.
+* **Implementation:** Move from permanent admin access to **Just-In-Time (JIT) access**.
+* **Outcome:** Limits the damage if an account is compromised.
 
 ### [05_IAM_Lifecycle.md](./05_IAM_Lifecycle.md) | Joiner, Mover, Leaver (JML)
-* **The Pipeline:** Automating the flow of users through the organization.
-* **Joiner:** Automated provisioning (Birthright access) triggered by HR.
-* **Mover:** Detecting role changes to prevent "Privilege Creep" (accumulating access).
-* **Leaver:** The "Kill Switch"—automated, immediate revocation of all access upon termination.
+
+* **Pipeline:** Automates user access throughout the employee lifecycle.
+* **Joiner:** HR triggers account creation with appropriate access (*Birthright Access*).
+* **Mover:** Detects role changes to prevent **Privilege Creep** (access accumulating unnecessarily).
+* **Leaver:** Automatically revokes all access when someone leaves—acts as a “kill switch.”
 
 ### [06_Identity_Repositories.md](./06_Identity_Repositories.md) | The Source of Truth
-* **Active Directory (AD DS):** The legacy on-prem standard. Speaks LDAP/Kerberos. Hierarchical (OUs).
-* **Azure AD (Entra ID):** The modern cloud standard. Speaks OIDC/OAuth/SAML. Flat structure (Graph API).
-* **The Architecture:** Using specific repositories for specific needs (AD for legacy apps, Entra ID for SaaS/Cloud).
+
+* **Active Directory (AD DS):** Legacy on-prem solution. Uses LDAP/Kerberos. Organizes users in a hierarchy (OUs).
+* **Azure AD (Entra ID):** Modern cloud solution. Uses OIDC/OAuth/SAML. Flat structure via Graph API.
+* **Architecture Tip:** Use AD for legacy apps, Entra ID for cloud/SaaS apps.
 
 ---
 
 ## 🧠 Chapter 1 Capstone: The "MoneyGuard" Architecture
 
-By the end of Day 1, we have designed the high-level architecture for **MoneyGuard Bank**:
+By the end of this chapter, the high-level design of **MoneyGuard Bank** includes:
 
-1.  **Centralized Identity:** We use a Federation Hub (Azure AD/Okta) so apps don't manage their own users.
-2.  **Lifecycle Automation:** HR (Workday) triggers the creation of the AD account (Joiner).
-3.  **Access Model:** We use **RBAC** (Teller Role) for basic access, enhanced by **ABAC** (Location/Device checks) for sensitive transactions.
-4.  **Audit Trail:** Every access request is logged (Accounting) to satisfy banking regulations.
+1. **Centralized Identity:** Federation Hub (Azure AD/Okta) ensures apps do not manage individual users.
+2. **Lifecycle Automation:** HR (Workday) triggers AD account creation for new employees.
+3. **Access Model:** RBAC for basic roles (e.g., Teller) + ABAC for sensitive actions (location/device checks).
+4. **Audit Trail:** All access requests are logged for regulatory compliance.
 
 ---
 
 ## 💡 Practice Questions (Self-Check)
 
-1.  **How does IAM improve enterprise security?**
-    * *Short Answer:* It reduces the attack surface by enforcing Least Privilege and centralizing control, ensuring a compromised user doesn't compromise the whole system.
-2.  **What is the difference between IAM and PAM?**
-    * *Short Answer:* IAM manages standard users (Email, Portal). PAM (Privileged Access Management) manages "Super Users" (Admins, DBAs) with vaulting and session recording.
-3.  **Why separate Authentication from Authorization?**
-    * *Short Answer:* Scalability. AuthN (IdP) is done once to establish identity. AuthZ (Policy) is done on every request to ensure the user still has permission *right now*.
+1. **How does IAM improve enterprise security?**
+   *Short Answer:* It reduces the attack surface by enforcing **Least Privilege** and centralizing control, so a single compromised user cannot jeopardize the whole system.
 
----
+2. **What is the difference between IAM and PAM?**
+   *Short Answer:*
+
+   * **IAM** manages normal users (Email, Portal, SaaS apps).
+   * **PAM (Privileged Access Management)** protects **super users** (Admins, DBAs, service accounts) using **vaulting** (password rotation) and **session recording**.
+
+3. **Why separate Authentication from Authorization?**
+   *Short Answer:*
+
+   * **Authentication (AuthN)** confirms identity once.
+   * **Authorization (AuthZ)** checks permissions **every request**, ensuring the user is still allowed to perform the action at that moment.
 
