@@ -101,10 +101,10 @@ Let's watch the AAA framework handle a complex scenario step-by-step.
 ### ❓ FAQ: Common Developer Questions
 
 **Q1: Why do I get a 401 error when I know my password is correct?**
-**A:** In a modern IAM system, a 401 usually means the *token* is missing, expired, or invalid. You might have authenticated successfully, but if your token expired 5 minutes ago, the API sees you as "Anonymous" (401).
+- **A:** In a modern IAM system, a 401 usually means the *token* is missing, expired, or invalid. You might have authenticated successfully, but if your token expired 5 minutes ago, the API sees you as "Anonymous" (401).
 
 **Q2: Can we handle Authorization inside the Authentication step?**
-**A:** You *can* (by putting Roles inside the ID Token), but it’s a bad practice for "Day 2" operations. If you put permissions in the token, and you need to revoke Alice's access *right now*, you can't—because she is holding a valid token until it expires (often 1 hour). Real-time Authorization (checking the DB or Policy Engine on every request) is safer for Banks.
+- **A:** You *can* (by putting Roles inside the ID Token), but it’s a bad practice for "Day 2" operations. If you put permissions in the token, and you need to revoke Alice's access *right now*, you can't—because she is holding a valid token until it expires (often 1 hour). Real-time Authorization (checking the DB or Policy Engine on every request) is safer for Banks.
 
-**Q3: Is MFA part of AuthN or AuthZ?**
-**A:** MFA is purely **AuthN**. It is a method of proving *who you are*. However, you can have an **AuthZ policy** that says: "You cannot enter this specific door unless you used MFA during AuthN."
+**Q3: Is MFA part of AuthN (Authentication) or AuthZ (Authorization)?**
+- **A:** MFA belongs entirely to AuthN (Authentication)—it is a mechanism used to verify a user’s identity. That said, AuthZ (Authorization) policies can be written to require that MFA was used during authentication, for example: access to a specific resource is allowed only if the user authenticated with MFA.
