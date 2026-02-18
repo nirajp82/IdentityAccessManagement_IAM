@@ -67,11 +67,10 @@ LDAP is **how you talk to directories**.
 ## 3️⃣ Cloud Directory (Azure AD / Entra ID)
 
 ### What It Is (And Is NOT)
-
-* Not “AD in the cloud”
-* No Kerberos
-* No NTLM
-* No OUs
+* **What it is:** This is **NOT** just "AD in the cloud." It is a completely different beast.
+* **No Kerberos/NTLM:** It speaks **HTTP/REST** (OIDC, OAuth, SAML).
+* **Flat Structure:** No OUs. Just Users and Groups.
+* **Dev Context:** You access this via **Microsoft Graph API** (REST calls).
 
 ### What It Uses
 
@@ -86,6 +85,11 @@ LDAP is **how you talk to directories**.
 * SaaS apps
 * Cloud workloads
 * Modern APIs
+
+
+* **MoneyGuard Use Case:** Used for Office 365, logging into the Azure Portal, and authenticating your modern .NET Core Microservices.
+  
+**Key Architect Takeaway:** In a Hybrid Enterprise (MoneyGuard), you sync on-prem AD to Azure AD using **Azure AD Connect**. AD remains the "Source of Truth" for users; Azure AD is the "Projection" for the cloud.
 
 ---
 
