@@ -77,3 +77,75 @@ By the end of this chapter, the high-level design of **MoneyGuard Bank** include
    * **Authentication (AuthN)** confirms identity once.
    * **Authorization (AuthZ)** checks permissions **every request**, ensuring the user is still allowed to perform the action at that moment.
 
+---
+
+## 1️ IAM vs PAM Diagram
+
+```
+          ┌───────────────────────┐
+          │      IAM (Identity)   │
+          └───────────────────────┘
+                    │
+          Manages regular users
+       (Email, Portal, SaaS apps)
+                    │
+             Role-Based Access
+                    │
+         -------------------------
+                    │
+          ┌───────────────────────┐
+          │      PAM (Privileged) │
+          └───────────────────────┘
+                    │
+          Manages high-risk accounts
+      (Admins, DBAs, Service Accounts)
+                    │
+         Vaulting + Session Recording
+```
+
+**Key Idea:**
+
+* **IAM** = general users, productivity, day-to-day access
+* **PAM** = privileged users, high-risk, super-sensitive controls
+
+---
+
+## 2️ MoneyGuard IAM Lifecycle (Joiner → Mover → Leaver)
+
+```
+           ┌───────────────┐
+           │   Joiner      │
+           │ (New Employee)│
+           └──────┬────────┘
+                  │
+   HR triggers provisioning
+                  │
+           ┌──────┴────────┐
+           │    Mover      │
+           │ (Role Change) │
+           └──────┬────────┘
+                  │
+   Update permissions / prevent
+        privilege creep
+                  │
+           ┌──────┴────────┐
+           │   Leaver      │
+           │ (Exit/Leave)  │
+           └───────────────┘
+                  │
+       Access revoked immediately
+      (No lingering permissions)
+```
+
+**Key Idea:**
+
+* Automation ensures **security and compliance** without relying on manual steps.
+* **Joiner** = get access, **Mover** = adjust access, **Leaver** = remove access instantly.
+
+---
+
+💡 **Optional Enhancement:**
+We can combine both into **one infographic** showing IAM, PAM, and JML flow together:
+
+* IAM covers all regular users (Joiner → Mover → Leaver).
+* PAM overlays the same flow for privileged accounts with vaulting/session logging.
