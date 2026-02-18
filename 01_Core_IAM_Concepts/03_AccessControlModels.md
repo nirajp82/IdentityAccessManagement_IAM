@@ -182,23 +182,7 @@ Encoding this logic directly in C# would result in duplicated, brittle logic acr
 
 ---
 
-## 🔗 Why This Matters for the Lambda IAM Role
-
-For a role defining **next-generation IAM at scale**, the expectation is that you can:
-
-* Design **layered authorization models**
-* Support enterprise RBAC while avoiding role explosion
-* Enforce fine-grained ABAC decisions efficiently
-* Centralize policy logic for compliance-heavy customers
-* Expose authorization as a **platform capability**, not an application concern
-
-This section directly maps to how you would reason about IAM architecture for **multi-tenant, security-critical platforms serving both startups and highly regulated AI labs**.
----
-Understood. Below is the **cleaned, book-style version** of the same content, with **no mention of interviews, staff level, or hiring context**, while keeping the explanations deep, continuous, and suitable for studying IAM system design concepts end to end.
-
----
-
-# 📘 Mapping RBAC, ABAC, and PBAC to OAuth2 / OpenID Connect (OIDC)
+## 📘 Mapping RBAC, ABAC, and PBAC to OAuth2 / OpenID Connect (OIDC)
 
 In modern distributed systems, OAuth2 and OpenID Connect (OIDC) are not only authentication protocols but also the primary mechanism by which **identity and authorization context is propagated across services**. Understanding how access control models such as RBAC, ABAC, and PBAC map onto OAuth2/OIDC tokens is critical to designing scalable and secure IAM systems.
 
@@ -208,9 +192,9 @@ This section explains what each model contributes, what belongs in tokens, and w
 
 ---
 
-## 1️⃣ RBAC and OAuth2 / OIDC Claims
+### 1️⃣ RBAC and OAuth2 / OIDC Claims
 
-### Conceptual Mapping
+#### Conceptual Mapping
 
 RBAC maps most naturally to OAuth2 and OIDC because roles are typically **stable, low-cardinality attributes** that represent organizational intent rather than request-specific conditions. As a result, RBAC information is commonly embedded directly into tokens as claims.
 
@@ -220,7 +204,7 @@ RBAC answers the question:
 
 ---
 
-### Common Claims Used for RBAC
+#### Common Claims Used for RBAC
 
 RBAC is usually represented using claims such as:
 
@@ -243,7 +227,7 @@ These claims can be evaluated locally by services without additional network cal
 
 ---
 
-### Practical Usage
+#### Practical Usage
 
 When a user authenticates, the Identity Provider issues a token containing role information. Each downstream service inspects the token and determines whether the role permits access to a given API or feature.
 
@@ -261,15 +245,15 @@ This approach works well for **coarse-grained authorization**, such as applicati
 
 ---
 
-### Key Constraint
+#### Key Constraint
 
 RBAC works best when roles remain few and semantically clear. As soon as roles are used to encode situational logic, the model begins to break down.
 
 ---
 
-## 2️⃣ ABAC and OAuth2 / OIDC Claims
+### 2️⃣ ABAC and OAuth2 / OIDC Claims
 
-### Why ABAC Cannot Be Fully Token-Based
+#### Why ABAC Cannot Be Fully Token-Based
 
 ABAC relies on attributes that are often **dynamic, resource-specific, or environment-dependent**, which makes it impractical and unsafe to encode the full authorization decision into a token.
 
@@ -285,7 +269,7 @@ ABAC answers the question:
 
 ---
 
-### User Attributes in Tokens
+#### User Attributes in Tokens
 
 OIDC tokens commonly include subject attributes such as:
 
@@ -303,7 +287,7 @@ These claims describe the identity but do not by themselves determine authorizat
 
 ---
 
-### Runtime Attribute Evaluation
+#### Runtime Attribute Evaluation
 
 When a request is made, the application retrieves additional information such as:
 
@@ -317,7 +301,7 @@ For example, even if a user’s role allows access in general, a rule may deny a
 
 ---
 
-### Implementation Pattern
+#### Implementation Pattern
 
 In practice, ABAC logic is implemented in:
 
@@ -331,9 +315,9 @@ This ensures that access decisions reflect **current data and conditions**, not 
 
 ---
 
-## 3️⃣ PBAC and OAuth2 / OIDC
+### 3️⃣ PBAC and OAuth2 / OIDC
 
-### Separation of Identity and Policy Logic
+#### Separation of Identity and Policy Logic
 
 PBAC extends ABAC by treating authorization logic as a **managed system component** rather than application logic. While OAuth2 and OIDC establish identity and authentication context, PBAC systems perform authorization decisions externally using centralized policies.
 
@@ -343,7 +327,7 @@ PBAC answers the question:
 
 ---
 
-### Role of Tokens in PBAC
+#### Role of Tokens in PBAC
 
 Tokens in a PBAC-based system typically include:
 
@@ -365,7 +349,7 @@ Tokens identify *who* is calling the system, but they do not encode *whether* a 
 
 ---
 
-### Runtime Policy Evaluation
+#### Runtime Policy Evaluation
 
 When a protected operation is requested, the application sends a structured request to a policy engine containing:
 
@@ -379,7 +363,7 @@ This allows authorization rules to evolve independently of application code.
 
 ---
 
-## ⚠️ Common Design Pitfalls
+### ⚠️ Common Design Pitfalls
 
 * Encoding fine-grained permissions directly into tokens
 * Treating OAuth2 scopes as a replacement for ABAC
@@ -388,38 +372,38 @@ This allows authorization rules to evolve independently of application code.
 
 ---
 
-## ❓ Frequently Asked Questions
+### ❓ Frequently Asked Questions
 
-### Q1: Can RBAC and ABAC be used together?
+#### Q1: Can RBAC and ABAC be used together?
 
 Yes. RBAC is typically used for coarse-grained authorization, such as determining which applications or APIs a user can access, while ABAC is used to enforce fine-grained, data-level rules within those boundaries.
 
 ---
 
-### Q2: Why not use ABAC for all authorization decisions?
+#### Q2: Why not use ABAC for all authorization decisions?
 
 While ABAC is more expressive, it introduces additional complexity and runtime dependency on data retrieval. RBAC remains valuable for simple, stable access decisions that do not require contextual evaluation.
 
 ---
 
-### Q3: How is MFA reflected in authorization decisions?
+#### Q3: How is MFA reflected in authorization decisions?
 
 MFA is part of authentication, not authorization. However, the fact that MFA was performed is conveyed through authentication context claims such as `acr` or `amr`, which authorization logic can require for sensitive operations.
 
 ---
 
-### Q4: How are attribute changes handled after a token is issued?
+#### Q4: How are attribute changes handled after a token is issued?
 
 Critical attributes are evaluated at runtime rather than relying solely on token claims. Tokens are typically short-lived, and changes to sensitive attributes may trigger token revocation or session invalidation.
 
 ---
 
-### Q5: What happens if a centralized policy engine is unavailable?
+#### Q5: What happens if a centralized policy engine is unavailable?
 
 Systems must explicitly define fail-open or fail-closed behavior based on the sensitivity of the operation. In many designs, critical authorization decisions fail closed, while lower-risk decisions may rely on cached results.
 
 ---
 
-### Core Mental Model (Summary)
+#### Core Mental Model (Summary)
 
 > OAuth2 and OIDC establish identity and authentication context, RBAC governs high-level access, ABAC enforces data- and context-aware rules at runtime, and PBAC centralizes complex authorization logic so that it can evolve independently of application code.
