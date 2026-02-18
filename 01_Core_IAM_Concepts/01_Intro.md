@@ -18,9 +18,3 @@ Imagine a bank with 50,000 employees and hundreds of applications.
 * **Security:** It reduces the risk of data breaches by ensuring only authorized users can access sensitive data.
 * **Compliance:** It helps companies meet regulatory requirements (like GDPR or SOX) by providing an audit trail of who accessed what and when.
 * **Efficiency:** It reduces IT workload and frustration for users (e.g., through Single Sign-On, where one login grants access to multiple apps).
-
-To dig deeper into how this works, which aspect would you like to explore next?
-
-1. **The User Lifecycle:** We can walk through the "Joiner, Mover, Leaver" process to see how automation handles hiring and firing.
-2. **The "AAA" Framework:** We can break down Authentication, Authorization, and Accounting with technical examples like Multi-Factor Authentication (MFA).
-3. **The Tech Stack:** We can look at the protocols (like SAML or OIDC) that allow different enterprise apps to talk to each other securely.
