@@ -1,10 +1,3 @@
-Understood — thanks for the context.
-You are **not writing a blog**, you are building a **System Design interview preparation book**, and **every section must explicitly map to interview-style questions and answers**. I’ll stick strictly to **your original template**, **restore and expand the FAQs**, and align everything to **Senior / Staff IAM System Design expectations**, especially for a role like **Senior / Staff IAM Software Engineer at Lambda**.
-
-Below is a **corrected and improved version** of your section that keeps your structure, keeps long-form explanations, restores FAQs, and reframes them as **interview Q&A**.
-
----
-
 # 📘 Section: Access Control Models (RBAC, ABAC, PBAC)
 
 ### Context: The *MoneyGuard* Banking Platform
