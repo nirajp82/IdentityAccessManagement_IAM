@@ -394,16 +394,29 @@ MFA is part of authentication, not authorization. However, the fact that MFA was
 
 #### Q4: How are attribute changes handled after a token is issued?
 
-Critical attributes are evaluated at runtime rather than relying solely on token claims. Tokens are typically short-lived, and changes to sensitive attributes may trigger token revocation or session invalidation.
+User and resource attributes that are critical for authorization are **evaluated at runtime**, rather than relying entirely on token claims, because tokens can become stale after issuance. Tokens are therefore kept **short-lived**, and changes to sensitive attributes (such as role removal, region change, or account suspension) may trigger **token revocation or session invalidation** to prevent continued access.
 
 ---
 
 #### Q5: What happens if a centralized policy engine is unavailable?
 
-Systems must explicitly define fail-open or fail-closed behavior based on the sensitivity of the operation. In many designs, critical authorization decisions fail closed, while lower-risk decisions may rely on cached results.
+In a PBAC-based system, the application depends on a centralized policy engine to make authorization decisions. If that engine is unavailable, the system must explicitly choose how to behave, typically using one of the following strategies.
 
----
+**Fail-closed (deny by default):**
+Access is denied when the policy engine cannot be reached. This approach is used for **high-risk or regulated actions**, such as approving large transactions, accessing sensitive personal data, or modifying IAM configuration, where allowing access without a decision would be unacceptable.
 
-#### Core Mental Model (Summary)
+**Fail-open (allow with constraints):**
+Access may be allowed when the risk is low, such as for **read-only or non-sensitive operations**, often by falling back to coarse RBAC checks. This prioritizes availability when the impact of an incorrect allow is minimal.
 
-> OAuth2 and OIDC establish identity and authentication context, RBAC governs high-level access, ABAC enforces data- and context-aware rules at runtime, and PBAC centralizes complex authorization logic so that it can evolve independently of application code.
+**Cached decisions (balanced approach):**
+Recent authorization decisions may be cached for a short time. If the policy engine becomes temporarily unavailable, the system can reuse a cached decision **only when the request context matches**, while still denying new or more sensitive requests.
+
+| Situation                            | Typical Behavior              |
+| ------------------------------------ | ----------------------------- |
+| Highly sensitive or regulated action | **Fail-closed** (deny access) |
+| Low-risk, read-only action           | **Fail-open** or cached allow |
+| Repeated identical request           | **Cached decision**           |
+| IAM or compliance-critical operation | **Always fail-closed**        |
+
+**Summary:**
+When a centralized policy engine is unavailable, systems must balance security and availability by failing closed for sensitive operations, optionally failing open for low-risk access, and using short-lived cached decisions where appropriate.
