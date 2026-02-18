@@ -1,4 +1,4 @@
-# 📘 Section 1.7: Identity Repositories (AD · LDAP · Cloud Directory)
+# 📘 Section: Identity Repositories (AD · LDAP · Cloud Directory)
 
 ### Context: Where Identity Actually Lives
 
