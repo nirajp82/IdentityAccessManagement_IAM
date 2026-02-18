@@ -1,10 +1,4 @@
-Below is a **rewritten, in-depth README-style guide**, keeping **the same structure, tone, and MoneyGuard continuity**, but expanding **each section deeply**, adding **clear sub-sections, FAQs, and concrete enterprise use cases**, while staying readable and systematic.
-
-No interview mentions. No meta commentary. This is written as a **study book** you can read end-to-end.
-
----
-
-# 📘 Section 1.6: The IAM Lifecycle (Joiner · Mover · Leaver)
+# 📘 : The IAM Lifecycle (Joiner · Mover · Leaver)
 
 ### Context: HR-Driven Identity at *MoneyGuard*
 
