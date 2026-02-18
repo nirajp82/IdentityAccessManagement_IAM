@@ -1,7 +1,3 @@
-Below is a **rewritten, polished README-style version** of **Section 1.4**, keeping your tone, long-form explanations, and examples intact, while **improving clarity, flow, and depth**. I’ve also **expanded the FAQ** and **added additional real-world use cases at the end**, as requested.
-
----
-
 # 📘 Section 1.4: Principle of Least Privilege (PoLP)
 
 ### Context: Security Hardening at *MoneyGuard*
