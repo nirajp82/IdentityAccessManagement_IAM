@@ -374,49 +374,103 @@ This allows authorization rules to evolve independently of application code.
 
 ### ❓ Frequently Asked Questions
 
-#### Q1: Can RBAC and ABAC be used together?
+Here is the combined, simplified, and easy-to-remember FAQ list. I have merged duplicates and refined the language to be interview-ready.
 
-Yes. RBAC is typically used for coarse-grained authorization, such as determining which applications or APIs a user can access, while ABAC is used to enforce fine-grained, data-level rules within those boundaries.
+### **Part 1: The Core Models (RBAC, ABAC, PBAC)**
+
+#### **Q1: If I had to choose only one model to start with, which one?**
+
+**Answer: Start with RBAC (Role-Based Access Control).**
+It aligns with how businesses work (teams, job titles). It is simple, easy to audit, and most identity providers (like Okta or Azure AD) already support it.
+
+* **Rule:** Use RBAC for **broad access** (e.g., "Tellers can open the App").
+
+#### **Q2: When does RBAC stop being sufficient?**
+
+**Answer: When "Context" matters.**
+RBAC fails when access depends on *conditions*, not just your job title. If you hear requirements like "Only during business hours," "Only transactions under $10k," or "Only from the office," RBAC is too rigid. Using roles for this leads to "Role Explosion" (too many specific roles to manage).
+
+#### **Q3: When should I introduce ABAC?**
+
+**Answer: When you need fine-grained control.**
+Use ABAC (Attribute-Based Access Control) when decisions depend on **runtime details**:
+
+* **User:** Region, Department.
+* **Resource:** Data sensitivity, Owner.
+* **Environment:** Time of day, Device, IP address.
+* **Rule:** Use ABAC for **specific rules** (e.g., "Tellers can only see accounts *in their own branch*").
+
+#### **Q4: Can RBAC and ABAC be used together?**
+
+**Answer: Yes, and they should be.**
+They work best as a team in a **layered architecture**:
+
+1. **RBAC acts as the Gatekeeper:** Checks broad access at the entry point (API Gateway). *("Is this user a Teller? Yes. Let them in.")*
+2. **ABAC acts as the Guard:** Checks specific data rules inside the application. *("Is this specific account in the Teller's region? No. Block access.")*
+
+#### **Q5: Why not just use ABAC for everything and skip RBAC?**
+
+**Answer: Because ABAC is expensive and complex.**
+Checking attributes for every single request creates a heavy performance load and makes the system harder to audit. RBAC is a cheap, fast way to filter out unauthorized users before they even reach the expensive ABAC logic.
+
+* **Analogy:** RBAC is the badge reader at the building entrance; ABAC is the security guard inside a specific secure room. You need both.
+
+#### **Q6: Where does PBAC fit in?**
+
+**Answer: PBAC governs the rules.**
+While ABAC is the *logic*, PBAC (Policy-Based Access Control) is the *management*. It moves authorization rules out of the code and into a centralized **Policy Engine** (like OPA). This ensures rules are consistent across all microservices and makes compliance easy.
 
 ---
 
-#### Q2: Why not use ABAC for all authorization decisions?
+### **Part 2: Operational & Runtime Logic**
 
-While ABAC is more expressive, it introduces additional complexity and runtime dependency on data retrieval. RBAC remains valuable for simple, stable access decisions that do not require contextual evaluation.
+#### **Q7: What happens if the Central Policy Engine goes down?**
+
+**Answer: You need a fallback strategy.**
+If the application cannot reach the PBAC engine to get a decision, it must choose one of these paths:
+
+* **Fail-Closed (Safest):** Deny all access. Use this for high-risk actions (e.g., money transfers).
+* **Fail-Open (Risky):** Allow access if the risk is low (e.g., reading a public blog post).
+* **Cached Decision:** Use the last known good decision (if it's recent).
+
+#### **Q8: Where do OAuth2/OIDC Tokens fit in?**
+
+**Answer: Tokens are for Identity, not Permissions.**
+Tokens should tell you **"Who the user is"** (User ID, Group, Auth Context), not **"What they can do."**
+
+* **Don't put permissions in tokens:** Tokens are static. If you change a permission, the user still holds the old token until it expires.
+* **Do put stable attributes in tokens:** User ID, MFA status, Roles.
+
+#### **Q9: How do we handle changes (like firing an employee) if they still have a valid token?**
+
+**Answer: By checking authorization at runtime.**
+Since tokens cannot be changed once issued, you cannot rely on them alone.
+
+* **Critical Actions:** Always check the database or policy engine in real-time for critical changes (like account suspension) before allowing sensitive actions.
+* **Token Revocation:** Shorten token lifespans so unauthorized access doesn't last long.
+
+#### **Q10: Is MFA part of Authorization?**
+
+**Answer: No, MFA is Authentication.**
+MFA proves *who you are*. However, Authorization can **check** if MFA was used.
+
+* **Example:** "You can log in with a password, but to transfer over $10,000 (Authorization Rule), we require that you used MFA during login (Authentication Context)."
 
 ---
 
-#### Q3: How is MFA reflected in authorization decisions?
+### **Part 3: Summary & Common Mistakes**
 
-MFA is part of authentication, not authorization. However, the fact that MFA was performed is conveyed through authentication context claims such as `acr` or `amr`, which authorization logic can require for sensitive operations.
+#### **Q11: What is the most common IAM design mistake?**
 
----
+**Answer: Trying to put authorization complexity inside the Token.**
+Developers often stuff permissions, limits, and rules into the JWT. This creates a "stale data" problem where you can't revoke access instantly.
 
-#### Q4: How are attribute changes handled after a token is issued?
+* **Golden Rule:** Identity goes in the Token; Authorization happens at Runtime.
 
-User and resource attributes that are critical for authorization are **evaluated at runtime**, rather than relying entirely on token claims, because tokens can become stale after issuance. Tokens are therefore kept **short-lived**, and changes to sensitive attributes (such as role removal, region change, or account suspension) may trigger **token revocation or session invalidation** to prevent continued access.
+#### **Q12: How would you explain this entire model to an auditor?**
 
----
+**Answer: The "Layered Defense" approach.**
 
-#### Q5: What happens if a centralized policy engine is unavailable?
-
-In a PBAC-based system, the application depends on a centralized policy engine to make authorization decisions. If that engine is unavailable, the system must explicitly choose how to behave, typically using one of the following strategies.
-
-**Fail-closed (deny by default):**
-Access is denied when the policy engine cannot be reached. This approach is used for **high-risk or regulated actions**, such as approving large transactions, accessing sensitive personal data, or modifying IAM configuration, where allowing access without a decision would be unacceptable.
-
-**Fail-open (allow with constraints):**
-Access may be allowed when the risk is low, such as for **read-only or non-sensitive operations**, often by falling back to coarse RBAC checks. This prioritizes availability when the impact of an incorrect allow is minimal.
-
-**Cached decisions (balanced approach):**
-Recent authorization decisions may be cached for a short time. If the policy engine becomes temporarily unavailable, the system can reuse a cached decision **only when the request context matches**, while still denying new or more sensitive requests.
-
-| Situation                            | Typical Behavior              |
-| ------------------------------------ | ----------------------------- |
-| Highly sensitive or regulated action | **Fail-closed** (deny access) |
-| Low-risk, read-only action           | **Fail-open** or cached allow |
-| Repeated identical request           | **Cached decision**           |
-| IAM or compliance-critical operation | **Always fail-closed**        |
-
-**Summary:**
-When a centralized policy engine is unavailable, systems must balance security and availability by failing closed for sensitive operations, optionally failing open for low-risk access, and using short-lived cached decisions where appropriate.
+1. **RBAC** limits *who* enters the system (Least Privilege).
+2. **ABAC** limits *what* data they touch based on context (Data Security).
+3. **PBAC** ensures all rules are central, versioned, and auditable (Compliance).
