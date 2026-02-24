@@ -104,7 +104,19 @@ Let's watch the AAA framework handle a complex scenario step-by-step.
 - **A:** In a modern IAM system, a 401 usually means the *token* is missing, expired, or invalid. You might have authenticated successfully, but if your token expired 5 minutes ago, the API sees you as "Anonymous" (401).
 
 **Q2: Can we handle Authorization inside the Authentication step?**
-- **A:** You *can* (by putting Roles inside the ID Token), but it’s a bad practice for "Day 2" operations. If you put permissions in the token, and you need to revoke Alice's access *right now*, you can't—because she is holding a valid token until it expires (often 1 hour). Real-time Authorization (checking the DB or Policy Engine on every request) is safer for Banks.
+- **A:** Authorization *can* be handled during authentication by embedding roles or permissions inside the ID or Access Token, but this is a **bad practice for “Day-2” operations**. Tokens are **static**—once issued, they remain valid until they expire. If access must be revoked immediately (for example, employee termination, role change, or security incident), the system cannot enforce that change while the user still holds a valid token. Policy updates and contextual rules (time, risk, transaction value) are also ignored until token renewal. In regulated environments like **banks**, **real-time authorization**—checking current permissions from a database or policy engine on every request—is safer because it enables immediate revocation and dynamic enforcement.
+- **Example:**
+Alice is terminated at 10:05 AM, but her token expires at 11:00 AM.
+Even though HR revoked her role, she can still access systems for 55 minutes.
+Real-time authorization would block her access immediately.
 
 **Q3: Is MFA part of AuthN (Authentication) or AuthZ (Authorization)?**
-- **A:** MFA belongs entirely to AuthN (Authentication)—it is a mechanism used to verify a user’s identity. That said, AuthZ (Authorization) policies can be written to require that MFA was used during authentication, for example: access to a specific resource is allowed only if the user authenticated with MFA.
+- **A:** **MFA (Multi-Factor Authentication) belongs entirely to AuthN (Authentication)** because its sole purpose is to **prove who the user is** by requiring multiple independent factors (something you know, have, or are). MFA strengthens identity verification but **does not decide what the user is allowed to do**—that decision remains the responsibility of **AuthZ (Authorization)**.
+
+However, **authorization policies can depend on authentication strength**. An AuthZ policy may require that MFA was used during login before granting access to sensitive resources. In this case, AuthZ is **not performing MFA**, but it is **checking an authentication attribute** (e.g., `mfa=true`) before allowing access. This separation keeps identity verification clean while enabling risk-based and compliance-driven access control.
+
+- **Example (2–3 lines):**
+Alice logs in using username + password + OTP (MFA) → Authentication succeeds.
+Authorization policy checks `mfa=true` before allowing access to wire-transfer APIs.
+Without MFA, access is denied even though Alice’s identity is valid.
+
