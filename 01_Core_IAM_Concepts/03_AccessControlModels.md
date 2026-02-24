@@ -150,37 +150,6 @@ Encoding this logic directly in C# would result in duplicated, brittle logic acr
 
 ---
 
-## ❓ System Design Interview FAQs (Do Not Skip)
-
-### Q1: Can RBAC and ABAC be used together?
-
-**A:** Yes, and they almost always are in enterprise systems. RBAC is used for coarse-grained access such as application entry points, while ABAC is used for fine-grained decisions such as record-level or field-level access.
-
----
-
-### Q2: Why not use ABAC everywhere and drop RBAC?
-
-**A:** RBAC is simpler, easier to audit, and aligns well with organizational models. Using ABAC for everything increases complexity unnecessarily and makes high-level access decisions harder to reason about.
-
----
-
-### Q3: Where does PBAC fit in a microservices architecture?
-
-**A:** PBAC is typically implemented as a shared authorization service or policy engine that multiple services query, ensuring consistent authorization decisions across the system.
-
----
-
-### Q4: How does this relate to MFA — is MFA AuthN or AuthZ?
-
-**A:** MFA is part of Authentication because it proves identity. However, Authorization policies can require that MFA was used, for example by denying access to sensitive operations unless the authentication context indicates MFA was performed.
-
----
-
-### Q5: How would you explain this model to an auditor?
-
-**A:** RBAC determines who can access the system, ABAC determines what specific data they can access, and PBAC ensures that complex regulatory rules are enforced consistently and centrally.
-
----
 
 ## 📘 Mapping RBAC, ABAC, and PBAC to OAuth2 / OpenID Connect (OIDC)
 
@@ -474,3 +443,36 @@ Developers often stuff permissions, limits, and rules into the JWT. This creates
 1. **RBAC** limits *who* enters the system (Least Privilege).
 2. **ABAC** limits *what* data they touch based on context (Data Security).
 3. **PBAC** ensures all rules are central, versioned, and auditable (Compliance).
+
+
+## ❓ System Design Interview FAQs (Do Not Skip)
+
+### Q1: Can RBAC and ABAC be used together?
+
+**A:** Yes, and they almost always are in enterprise systems. RBAC is used for coarse-grained access such as application entry points, while ABAC is used for fine-grained decisions such as record-level or field-level access.
+
+---
+
+### Q2: Why not use ABAC everywhere and drop RBAC?
+
+**A:** RBAC is simpler, easier to audit, and aligns well with organizational models. Using ABAC for everything increases complexity unnecessarily and makes high-level access decisions harder to reason about.
+
+---
+
+### Q3: Where does PBAC fit in a microservices architecture?
+
+**A:** PBAC is typically implemented as a shared authorization service or policy engine that multiple services query, ensuring consistent authorization decisions across the system.
+
+---
+
+### Q4: How does this relate to MFA — is MFA AuthN or AuthZ?
+
+**A:** MFA is part of Authentication because it proves identity. However, Authorization policies can require that MFA was used, for example by denying access to sensitive operations unless the authentication context indicates MFA was performed.
+
+---
+
+### Q5: How would you explain this model to an auditor?
+
+**A:** RBAC determines who can access the system, ABAC determines what specific data they can access, and PBAC ensures that complex regulatory rules are enforced consistently and centrally.
+
+---
