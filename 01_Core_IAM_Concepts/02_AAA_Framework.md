@@ -89,7 +89,7 @@ Let's watch the AAA framework handle a complex scenario step-by-step.
 * *Policy:* "Access to Swift Portal requires 'Corporate Network' OR 'VPN'."
 * *Context:* Bob is on public Wi-Fi.
 
-* **Status:** **403 Forbidden**. Authorization Denied based on context (ABAC), even though he has the right Role.
+* **Status:** **403 Forbidden**. Authorization Denied based on context (ABAC - Attribute-Based Access Control), even though he has the right Role.
 
 3. **Accounting (The Trail):**
 * **Step:** The denial is logged.
