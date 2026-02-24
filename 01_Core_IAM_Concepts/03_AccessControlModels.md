@@ -33,9 +33,30 @@ public IActionResult ViewAccount(Guid accountId) { ... }
 
 ABAC fixes Role Explosion. Instead of just asking *who* the user is, ABAC asks *under what conditions* access should be allowed. It makes decisions in real-time by evaluating three pillars:
 
-1. **Subject Attributes:** Data about the user (e.g., Department, Clearance Level).
-2. **Resource Attributes:** Data about the thing being accessed (e.g., Data Classification, Dollar Amount).
-3. **Environment Attributes:** Data about the current situation (e.g., Time of Day, IP Address).
+### 🧑‍💼 1. Subject Attributes (The "Who")
+
+Data about the **person or system** making the request.
+
+* **Role & Department:** Teller, Manager, Retail, IT.
+* **Clearance Level:** Basic, Top Secret.
+* **Employment Type:** Full-time, temporary contractor.
+
+### 📁 2. Resource Attributes (The "What")
+
+Data about the **specific item or data** being accessed.
+
+* **Classification & Ownership:** Public, Highly Confidential, VIP customer.
+* **Value:** Transaction amount ($50 vs. $5M).
+* **Region:** US data vs. EU data (GDPR constraints).
+
+### 🌍 3. Environment Attributes (The "Context")
+
+Data about the **current situation** (the secret sauce that catches what static roles miss).
+
+* **Location (Where):** Corporate Wi-Fi vs. foreign IP address.
+* **Time (When):** Business hours vs. 3:00 AM on a weekend.
+* **Device (How):** Company-issued laptop vs. personal jailbroken phone.
+* **Risk (What):** Normal operations vs. active cyberattack lockdown.
 
 * **How it Works:** Alice (a Teller) tries to view a VIP account while working from home. The ABAC rule says: *Allow access ONLY IF the user is a Teller, the resource is a standard account, AND the environment is the corporate office network.* Because Alice is at home looking at a VIP account, the system denies access. No special `WFH_Teller` role is needed.
 
