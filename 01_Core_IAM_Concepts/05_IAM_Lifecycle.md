@@ -1,7 +1,5 @@
 # 📘 The IAM Lifecycle Guide (Joiner · Mover · Leaver)
 
-## 🗺️ High-Level Architecture Diagram
-
 ```mermaid
 graph TD
     %% Source of Truth
