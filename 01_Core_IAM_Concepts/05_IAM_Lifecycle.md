@@ -88,8 +88,7 @@ While the IdP (Okta/Entra) handles the *login*, IGA and SCIM work together to de
 
 * **SCIM (System for Cross-domain Identity Management)**
 * **The Definition:** An industry-standard HTTP/JSON protocol used to automate user provisioning. It provides standardized endpoints (`POST`, `PATCH`, `DELETE`) allowing the IAM system to uniformly create, update, or deactivate user accounts in downstream SaaS applications (like GitHub or Slack) without requiring custom API scripts.
-* **In Context (The Universal Remote Control):** Once the IGA system decides Alice needs a GitHub account and Slack access, it hands off to the IdP, which uses SCIM to actually create them. Instead of IT writing a custom script for Slack and a different custom script for GitHub, our IAM system sends a universal SCIM `POST` command. Slack and GitHub both instantly understand this standard language and create Alice's accounts. When she leaves, SCIM sends a `DELETE` command, locking her out of everything simultaneously.
-
+**In Context (The Universal Remote Control):** Once the IGA system decides Alice needs a GitHub account and Slack access, it hands off the actual creation to the IdP. **It does this by adding Alice to specific application groups inside the IdP (Okta/Entra).** The IdP detects this new group membership and instantly uses SCIM to push a universal `POST` command to Slack and GitHub, creating her accounts (Okta/Entra sees that Alice was just added to those groups. Because the IdP is configured with a rule that says *"Anyone in 'App-GitHub-Users' gets a GitHub account,"* the IdP's SCIM engine instantly fires the `POST` payload to GitHub.). When she leaves, the IGA removes her from the group, and the IdP's SCIM engine automatically sends a `DELETE` command, locking her out.
 
 
 ### 5. Immutable ID (UUID)
