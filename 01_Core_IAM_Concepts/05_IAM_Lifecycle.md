@@ -61,6 +61,7 @@ Before looking at the JML flow, here is the technology driving it:
 **
 * **SCIM (System for Cross-domain Identity Management):** An industry-standard HTTP/JSON protocol for automating the exchange of user identity information. It allows us to `POST`, `PATCH`, or `DELETE` users in downstream apps (Slack, GitHub) uniformly without custom API scripts.
 * **Immutable ID (UUID):** A generated string (e.g., `550e8400...`) used as the primary key across all databases. If a user changes their name/email, the UUID remains static, preventing duplicate accounts or state corruption.
+* ** Zero-touch identity lifecycle automation** It is the end-to-end process where user access is instantly granted, modified, and revoked across all systems based solely on HR data triggers, completely eliminating the need for manual IT tickets or human intervention.
 
 ---
 
