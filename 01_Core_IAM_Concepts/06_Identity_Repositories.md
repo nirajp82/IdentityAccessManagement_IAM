@@ -67,34 +67,6 @@ Active Directory Domain Services (AD DS) is the traditional "King" of identity. 
 | **LDAP** | SQL | The protocol/language used to query the data (`LDAP://DC=MoneyGuard...`). |
 | **DN (Distinguished Name)** | Primary Key | The exact, unique path to a specific object in the tree. |
 
-
-### 1. Office 365 (Native Integration)
-
-* **How it's used:** Since Entra ID is built by Microsoft, it is the native gatekeeper for Outlook, Teams, and SharePoint.
-* **The Experience:** When Alice opens Outlook, her laptop sends a hidden "token" to Entra ID. Entra ID checks if she is still an active employee and immediately opens her mail. There is no password prompt because the **Access Plane** already knows who she is.
-
-### 2. Federated SaaS Apps (Slack, GitHub, Zoom)
-
-* **How it's used:** These apps don't store Alice’s password. Instead, they "Federate" (trust) *MoneyGuard’s* IdP.
-* **The Experience:** When Alice goes to `github.com`, she clicks "Login with SSO." GitHub redirects her to Okta/Entra. Once she taps her YubiKey (MFA), the Access Plane sends a digitally signed "Assertion" (SAML token) back to GitHub saying: *"This is Alice, she is an Engineer, let her in."*
-
-### 3. Cloud Workloads (AWS / Azure / GCP)
-
-* **How it's used:** Engineers never use "Local IAM Users" (which are high-risk permanent keys). Instead, they use **Identity Federation**.
-* **The Experience:** Alice logs into the *MoneyGuard* SSO dashboard and clicks "AWS Console." The Access Plane maps her "Engineering Manager" group to a specific **AWS IAM Role**. She is granted a short-lived session (e.g., 1 hour). When that hour is up, she must check back in with the Access Plane. This ensures no "permanent" keys exist to be stolen.
-
-### 4. Authenticating Modern Microservices (.NET Core / Node.js)
-
-* **How it's used:** This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Connect)**.
-* **The Experience:** Alice’s frontend dashboard (Node.js) needs to pull her account balance from the backend API (.NET).
-1. The Node.js app asks the Access Plane for a **JWT (JSON Web Token)**.
-2. The Access Plane issues a token containing Alice’s UUID and scopes (e.g., `read:balance`).
-3. The .NET API receives the token, validates the digital signature of the Access Plane, and grants the data. The API never sees Alice's password; it only trusts the **Access Plane's signature**.
-
-### 💡  Summary:
-
-At *MoneyGuard*, we don't treat these as separate logins. We treat the **Access Plane** as the **Central Policy Decision Point (PDP)**. Whether Alice is reading an email, pushing code to GitHub, or a service is calling an API, the "Plane" is the single place where we enforce MFA, check for "Leaver" status, and issue the temporary keys required to get work done.
-
 ---
 ## Cloud Directory (The Modern Access Plane)
 
@@ -109,6 +81,39 @@ In architecture, a "plane" is a layer that manages the flow of traffic. Traditio
 * **Protocols:** No Kerberos or NTLM. It speaks entirely in **HTTP/REST** web protocols (OIDC, OAuth 2.0, SAML 2.0).
 * **Developer Context:** Accessed via REST APIs (e.g., Microsoft Graph API, Okta Core API). Instead of "logging into a server," you are "requesting a token from the plane."
 * **MoneyGuard Use Cases:** Used for Office 365, federated SaaS apps (Slack, GitHub), cloud workloads (AWS/Azure/GCP), and authenticating modern .NET Core or Node.js microservices.
+
+### 🚀 Operational Use Cases: The Access Plane in Action
+
+At *MoneyGuard*, we do not treat cloud logins as separate events. We treat the **Modern Access Plane** (Okta/Entra ID) as the **Central Policy Decision Point (PDP)**. Every digital request Alice makes—whether reading an email or calling a microservice—must be authorized by the Plane.
+
+#### 1. Office 365 (Native Ecosystem Integration)
+
+* **How it's used:** Since Entra ID is the native identity layer for the Microsoft stack, it acts as the gatekeeper for Outlook, Teams, and SharePoint.
+* **The Technical Flow:** Alice logs into her Windows laptop (bound to the Technical Truth/AD). When she opens Outlook, the laptop provides a **Primary Refresh Token (PRT)** to the Access Plane. The Plane validates her "Active" state and device health, then silently issues an access token.
+* **The Experience:** Zero password prompts. The Access Plane handles the handshake behind the scenes because it already trusts the initial login.
+
+#### 2. Federated SaaS Apps (Slack, GitHub, Zoom)
+
+* **How it's used:** These applications are "Federated," meaning they do not store Alice’s password. They outsource (federate) their security to *MoneyGuard's* Access Plane.
+* **The Technical Flow:** When Alice goes to `github.com`, she clicks "Login with SSO." GitHub sends an **AuthnRequest** to the Access Plane. After Alice passes MFA, the Plane sends a digitally signed **SAML Assertion** or **OIDC Token** back to GitHub.
+* **The Experience:** GitHub never sees Alice's credentials. It only sees a "Signed Note" from the Access Plane saying: *"This is Alice (UUID: 1234), she is an Engineer, let her in."*
+
+#### 3. Cloud Workloads (AWS / GCP / Azure)
+
+* **How it's used:** Engineers never use "Local IAM Users" (permanent Access Keys). We use **Identity Federation** to grant temporary, just-in-time access.
+* **The Technical Flow:** Alice clicks "AWS Console" in her SSO portal. The Access Plane maps her "Engineering Manager" group to a specific **AWS IAM Role**. It passes a token to AWS via SAML, and AWS grants Alice a **short-lived session** (e.g., 1 to 12 hours).
+* **The Experience:** No permanent passwords or keys exist to be stolen. When the session expires, Alice must re-verify her identity with the Access Plane.
+
+#### 4. Authenticating Modern Microservices (.NET Core / Node.js)
+
+* **How it's used:** This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Connect)** and **JWTs (JSON Web Tokens)**.
+* **The Technical Flow:** Alice’s frontend dashboard (Node.js) needs to pull her account balance from a restricted backend API (.NET).
+1. The Node.js app requests an **Access Token** from the Access Plane.
+2. The Access Plane issues a **JWT** containing Alice’s **Immutable ID (UUID)** and specific "Scopes" (e.g., `scope: balance_read`).
+3. The .NET API receives the JWT, verifies the Access Plane's **Digital Signature** (using public keys), and checks the scopes before returning data.
+
+
+* **The Experience:** The backend API never handles Alice's password. It simply trusts the **Identity Token** issued by the Access Plane.
 
 ---
 
