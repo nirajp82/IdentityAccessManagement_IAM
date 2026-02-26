@@ -228,6 +228,83 @@ When explaining the value of this architecture to leadership or auditors, use th
 **Q: What is the technical difference between Provisioning and Deprovisioning?**
 **A:** **Provisioning** is the automated creation of user accounts and attributes in target systems (e.g., using SCIM to build a Salesforce account on Day 1). **Deprovisioning** is the automated removal or disabling of those accounts. Deprovisioning is a critical security control; ensuring access is revoked immediately across all systems in real-time to prevent data breaches.
 
+
+## 🚦 FAQ 
+
+### 🏛️ High-Level Architecture & Strategy
+
+**Q1: If HRIS is the source of truth, why do we call AD the "Technical Source of Truth"?**
+**A:** Because they represent two different layers of reality.
+
+* **HRIS (Workday/ADP)** is the **Administrative Source of Truth** (The "Legal Birth Certificate"). It determines *if* a person legally exists.
+* **Active Directory** is the **Primary Technical Repository** (The "Driver’s License"). It is the active database that provides the "grounded" version of an identity used for all technical operations. If a change is made in HR but fails to sync to AD, the rest of the company’s infrastructure will still see the old data. AD is the master technical record that the rest of the stack actually "listens" to.
+
+**Q2: Why are we maintaining On-Prem Active Directory if our target architecture is "Cloud-Native"?**
+**A:** Protocol incompatibility and the "Physical World" barrier. Cloud IdPs speak "Web" (SAML/OIDC). However, physical office infrastructure—such as Windows laptops, 802.1x Wi-Fi routers, legacy VPN appliances, and physical file shares (SMB)—strictly requires "Local" protocols like **RADIUS, Kerberos, and LDAP**. AD remains necessary to serve these legacy network requests locally where cloud protocols cannot reach.
+
+**Q3: Should our modern applications talk directly to Active Directory (AD) via LDAP?**
+**A:** No. Modern applications should avoid talking directly to Active Directory. Instead, they should federate authentication to the **Modern Access Plane** (Entra ID / Okta) via **OIDC** or **SAML**. This centralizes authentication, enforces MFA natively, and reduces direct dependency on legacy on-prem infrastructure. Direct LDAP calls to AD should be reserved strictly for legacy systems that cannot speak web protocols.
+
+---
+
+### 🛡️ Security & Governance
+
+**Q4: How exactly does IAM improve our enterprise security posture?**
+**A:** IAM shifts security from perimeter-based (firewalls) to identity-based, aligning with the **Zero Trust** model (trust nothing, verify everything). It reduces the attack surface via **Least Privilege**, protects credentials via **SSO** and global **MFA**, and provides a "single pane of glass" for visibility and forensic auditing.
+
+**Q5: What is the difference between IAM and PAM?**
+**A:** IAM secures everyday users; PAM secures the "keys to the kingdom."
+
+| Feature | IAM (Identity & Access Management) | PAM (Privileged Access Management) |
+| --- | --- | --- |
+| **Purpose** | Productivity and baseline security for all. | High-security lockdown for critical systems. |
+| **Accounts Managed** | Standard user accounts (Alice the Engineer). | Admin, root, and service accounts. |
+| **Example Tools** | Okta, Microsoft Entra ID, Ping. | CyberArk, Delinea, HashiCorp Vault. |
+| **Controls** | SSO, MFA, Group-based access. | Vaulting, password rotation, session recording. |
+| **Analogy** | The front door key to the office building. | The biometric combination to the bank vault. |
+
+---
+
+### ⚙️ Technical Implementation & Operations
+
+**Q6: What is the technical difference between Provisioning and Deprovisioning?**
+**A:** * **Provisioning:** The **automated creation** and management of user accounts and attributes in target systems (e.g., using **SCIM** to build a Salesforce account on Day 1). This ensures employees have the right tools immediately.
+
+* **Deprovisioning:** The **automated removal** of access. This is the most critical security control—ensuring that when a user is terminated in the HRIS, the "Kill Signal" is sent to every SaaS app instantly to prevent data breaches or unauthorized access.
+
+**Q7: How do we handle race conditions between Identity Creation and Application Provisioning?**
+**A:** By utilizing a state machine (e.g., AWS Step Functions or IGA workflows). We cannot send a SCIM payload to add a user to a GitHub group if the user account hasn't finished replicating from the Technical Truth (AD) to the Access Plane (Cloud). The workflow must receive a `200 OK` from the core directory sync before triggering downstream app provisioning.
+
+**Q8: Why revoke tokens during offboarding instead of just waiting for them to expire?**
+**A:** Valid tokens are equivalent to active credentials. If a user is terminated but their AWS CLI session or SaaS cookie is valid for another 8 hours, they maintain unrestricted access even after their password is changed. **Continuous Access Evaluation (CAE)** and immediate token revocation are mandatory for a Zero Trust posture.
+
+Service & Machine Identity (Non-Human Entities)
+
+**Q9: Why can't we just use regular User Accounts for our automated scripts and backend services?**
+**A:** Because humans and machines have different risk profiles.
+
+* **Non-Human Identities (NHIs):** These don't use MFA, they don't have "working hours," and they don't change roles.
+* **The Risk:** If you use a standard user account for a service, you cannot enforce MFA, and if that person leaves, the service breaks (or the account stays active, creating a massive security hole).
+* **The Standard:** Use **Service Principals** or **Managed Identities**. These are scoped strictly to the resource they need, utilize secret rotation, and are tied to the *application lifecycle*, not a human lifecycle.
+
+Resilience & Disaster Recovery
+
+**Q10: If our Cloud IdP (The Access Plane) goes down, does MoneyGuard stop functioning?**
+**A:** Only if we haven't implemented **Resilience Patterns**.
+
+* **Identity Continuity:** For mission-critical apps, we utilize "Emergency Access Accounts" (Break-glass) and local caching where available.
+* **The Trade-off:** We must balance security vs. availability. While the Cloud IdP is the primary gatekeeper, physical building access and core local network services often have a "fail-open" or "fail-local" configuration to ensure physical safety and basic connectivity during a cloud outage.
+
+#### 7️⃣ Identity in Multi-Cloud Environments
+
+**Q11: We use AWS, Azure, and GCP. Should we have separate identities in each cloud?**
+**A:** Absolutely not. That leads to "Identity Silos" and guaranteed security failures.
+
+* **The Strategy:** Use **Identity Federation**.
+* **How it works:** Our Cloud IdP (Okta/Entra) acts as the **External OIDC Provider**. When an engineer logs into the AWS Console or runs a GCP CLI command, they exchange their "Access Plane" token for a short-lived, cloud-native temporary key.
+* **The Goal:** Centralized visibility. If Alice is terminated, her access to *all* three clouds dies at the same second.
+
+---
 ---
 
 ### 💡 Final Mental Model (Memorize This)
