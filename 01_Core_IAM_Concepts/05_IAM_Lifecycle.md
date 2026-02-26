@@ -257,8 +257,12 @@ If the event-driven architecture breaks, we must prevent identity state drift. W
 **Q: How does SCIM handle partial failures or API rate limits on downstream SaaS apps?**
 **A:** When provisioning large cohorts (like 200 summer interns), we hit API rate limits on apps like GitHub, GitLab, or Slack. IdP/IGA SCIM integrations utilize message queues (e.g., AWS SQS, Azure Service Bus) with exponential backoff. Failed provisioning tasks are placed in a Dead Letter Queue (DLQ) and retried automatically over 24 hours.
 
-**Q: Why are we maintaining On-Prem Active Directory if our target architecture is cloud-native?**
-**A:** Strict legacy network dependencies. While modern web apps use OIDC/SAML via Okta/Entra, core networking infrastructure (Cisco ISE / Aruba ClearPass for 802.1x office Wi-Fi, older VPN appliances, legacy file shares) still requires RADIUS/LDAP protocols. AD acts as our authoritative on-prem directory, which is then synced upward to the cloud.
+**Q: Why are we maintaining On-Premises Active Directory (AD) if our target architecture is cloud-native?**
+**A:** It comes down to protocol constraints with legacy infrastructure. Cloud Identity Providers (Okta, Entra ID, Ping) are built for the web; they natively speak HTTP-based protocols like SAML 2.0, OAuth 2.0, and OIDC.
+
+However, enterprise local-area networks (LAN) and legacy infrastructure—such as Cisco ISE / Aruba for 802.1x office Wi-Fi, legacy VPN concentrators, on-premise file shares (SMB/CIFS), and older line-of-business applications—strictly require local authentication protocols like **LDAP, Kerberos, NTLM, or RADIUS**.
+
+Cloud IdPs do not natively act as a local Kerberos Key Distribution Center (KDC) and cannot efficiently route local LDAP traffic over the public internet without severe latency and security risks. Therefore, a **Hybrid Identity Model** is required. On-Prem AD is maintained strictly to serve these legacy network requests locally, while a sync agent (e.g., Entra Connect or Okta AD Agent) mirrors that identity state to the cloud to handle modern SaaS federation.
 
 **Q: How do we handle race conditions between Identity Creation and Application Provisioning?**
 **A:** By utilizing a state machine (e.g., AWS Step Functions, Azure Logic Apps, or native IGA workflows). We cannot send a SCIM payload to add a user to a GitHub group if the user account hasn't finished replicating from Active Directory to the IdP. The workflow requires a `200 OK` from the core directory creation step before triggering downstream app provisioning.
