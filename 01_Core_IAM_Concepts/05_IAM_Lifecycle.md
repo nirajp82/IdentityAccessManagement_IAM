@@ -242,7 +242,7 @@ If the event-driven architecture breaks, we must prevent identity state drift. W
 
 ---
 
-## 🧠 Staff Engineer System Design FAQ
+##  FAQ
 
 **Q: If the IGA (e.g., SailPoint / Saviynt) is the "Brain," why doesn't it provision downstream SaaS apps (like Slack or GitHub) directly? Why hand off SCIM provisioning to the IdP (e.g., Okta / Entra)?**
 **A:** In modern enterprise architecture, identity creation is a relay race. While the IGA *could* use SCIM to create Slack and GitHub accounts directly, we delegate this to the IdP. **Why?** Because the IdP (Okta/Entra) is already managing the SAML/SSO web login for those SaaS apps. If the IdP manages the login *and* the lifecycle (SCIM) in the exact same place, it creates a much cleaner, tighter integration. The IGA handles complex compliance rules and legacy on-prem infrastructure (Active Directory); the IdP handles fast, modern cloud apps.
