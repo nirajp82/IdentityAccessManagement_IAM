@@ -1,9 +1,5 @@
 # 📘 The IAM Lifecycle Guide (Joiner · Mover · Leaver)
 
-**Document Owner:** IAM Platform Engineering
-
-**Status:** Approved / Active
-
 **Target Architecture:** Hybrid Cloud Identity Model (Zero Trust Aligned)
 
 ## 🗺️ High-Level Architecture Diagram
