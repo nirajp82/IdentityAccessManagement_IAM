@@ -67,7 +67,33 @@ Active Directory Domain Services (AD DS) is the traditional "King" of identity. 
 | **LDAP** | SQL | The protocol/language used to query the data (`LDAP://DC=MoneyGuard...`). |
 | **DN (Distinguished Name)** | Primary Key | The exact, unique path to a specific object in the tree. |
 
-**MoneyGuard Use Cases:** Older Linux servers, legacy Java applications, and network firewalls often speak raw LDAP to authenticate users directly against Active Directory.
+
+### 1. Office 365 (Native Integration)
+
+* **How it's used:** Since Entra ID is built by Microsoft, it is the native gatekeeper for Outlook, Teams, and SharePoint.
+* **The Experience:** When Alice opens Outlook, her laptop sends a hidden "token" to Entra ID. Entra ID checks if she is still an active employee and immediately opens her mail. There is no password prompt because the **Access Plane** already knows who she is.
+
+### 2. Federated SaaS Apps (Slack, GitHub, Zoom)
+
+* **How it's used:** These apps don't store Alice’s password. Instead, they "Federate" (trust) *MoneyGuard’s* IdP.
+* **The Experience:** When Alice goes to `github.com`, she clicks "Login with SSO." GitHub redirects her to Okta/Entra. Once she taps her YubiKey (MFA), the Access Plane sends a digitally signed "Assertion" (SAML token) back to GitHub saying: *"This is Alice, she is an Engineer, let her in."*
+
+### 3. Cloud Workloads (AWS / Azure / GCP)
+
+* **How it's used:** Engineers never use "Local IAM Users" (which are high-risk permanent keys). Instead, they use **Identity Federation**.
+* **The Experience:** Alice logs into the *MoneyGuard* SSO dashboard and clicks "AWS Console." The Access Plane maps her "Engineering Manager" group to a specific **AWS IAM Role**. She is granted a short-lived session (e.g., 1 hour). When that hour is up, she must check back in with the Access Plane. This ensures no "permanent" keys exist to be stolen.
+
+### 4. Authenticating Modern Microservices (.NET Core / Node.js)
+
+* **How it's used:** This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Connect)**.
+* **The Experience:** Alice’s frontend dashboard (Node.js) needs to pull her account balance from the backend API (.NET).
+1. The Node.js app asks the Access Plane for a **JWT (JSON Web Token)**.
+2. The Access Plane issues a token containing Alice’s UUID and scopes (e.g., `read:balance`).
+3. The .NET API receives the token, validates the digital signature of the Access Plane, and grants the data. The API never sees Alice's password; it only trusts the **Access Plane's signature**.
+
+### 💡  Summary:
+
+At *MoneyGuard*, we don't treat these as separate logins. We treat the **Access Plane** as the **Central Policy Decision Point (PDP)**. Whether Alice is reading an email, pushing code to GitHub, or a service is calling an API, the "Plane" is the single place where we enforce MFA, check for "Leaver" status, and issue the temporary keys required to get work done.
 
 ---
 ## Cloud Directory (The Modern Access Plane)
