@@ -1,5 +1,9 @@
 # 📘 The IAM Lifecycle Guide (Joiner · Mover · Leaver)
 
+**Document Owner:** IAM Platform Engineering
+
+**Status:** Approved / Active
+
 **Target Architecture:** Hybrid Cloud Identity Model (Zero Trust Aligned)
 
 ## 🗺️ High-Level Architecture Diagram
@@ -32,8 +36,6 @@ graph TD
 
 ```
 
-**
-
 ---
 
 ## 🏢 Context: HR-Driven Identity at *MoneyGuard*
@@ -52,16 +54,13 @@ Your objective as an IAM Architect is **zero-touch identity lifecycle automation
 
 ## 🏗️ Core IAM Concepts & Technology Stack
 
-Before looking at the JML flow, here is the technology driving it:
-
-* **HRIS (Workday):** The absolute source of truth for employment state.
-* **IGA (SailPoint IdentityNow):** The "Brain." Identity Governance and Administration handles complex separation of duties (SoD), compliance reporting, and cross-system attribute mapping.
-* **IdP (Okta / Entra ID):** The "Bouncer." Handles authentication, SSO federation, and enforcing MFA policies.
-* **Webhooks (Push vs. Pull):** Instead of our IAM system constantly "polling" (asking HR every hour if someone was hired), Workday uses a webhook to "push" an event to AWS EventBridge the exact second a change occurs.
-**
-* **SCIM (System for Cross-domain Identity Management):** An industry-standard HTTP/JSON protocol for automating the exchange of user identity information. It allows us to `POST`, `PATCH`, or `DELETE` users in downstream apps (Slack, GitHub) uniformly without custom API scripts.
-* **Immutable ID (UUID):** A generated string (e.g., `550e8400...`) used as the primary key across all databases. If a user changes their name/email, the UUID remains static, preventing duplicate accounts or state corruption.
-* ** Zero-touch identity lifecycle automation** It is the end-to-end process where user access is instantly granted, modified, and revoked across all systems based solely on HR data triggers, completely eliminating the need for manual IT tickets or human intervention.
+* **Zero-Touch Identity Lifecycle Automation:** The end-to-end process where user access is instantly granted, modified, and revoked across all systems based solely on HR data triggers, completely eliminating the need for manual IT tickets or human intervention.
+* **HRIS (Human Resources Information System - e.g., Workday):** The authoritative system of record for employee data. It dictates the employment state (active, terminated, role changes) and acts as the absolute source of truth and sole trigger for all downstream identity lifecycle events.
+* **IGA (Identity Governance and Administration - e.g., SailPoint IdentityNow):** The centralized policy engine that controls *what* a user is allowed to access. It translates HR attributes into technical access rights, enforces Separation of Duties (SoD) policies to prevent toxic access combinations, and generates compliance audits to prove who has access to specific systems.
+* **IdP (Identity Provider - e.g., Okta / Microsoft Entra ID):** The centralized system that authenticates user identity. It verifies credentials, enforces Multi-Factor Authentication (MFA) policies, and uses Single Sign-On (SSO) federation to pass secure authentication tokens to downstream enterprise applications.
+* **Webhooks (Event-Driven Architecture):** A method for real-time system communication. Instead of the IAM platform continuously polling (querying) the HRIS on a schedule to check for changes, the HRIS uses a webhook to push an HTTP payload to the IAM system the exact millisecond a lifecycle event occurs.
+* **SCIM (System for Cross-domain Identity Management):** An industry-standard HTTP/JSON protocol used to automate user provisioning. It provides standardized endpoints (`POST`, `PATCH`, `DELETE`) allowing the IAM system to uniformly create, update, or deactivate user accounts in downstream SaaS applications (like GitHub or Slack) without requiring custom API scripts.
+* **Immutable ID (UUID):** A globally unique, permanent identifier (e.g., `550e8400...`) assigned to an identity at creation. It serves as the primary database key across all integrated systems. If a user's mutable attributes (name, email) change, the UUID remains static, preventing duplicate accounts or broken database relationships.
 
 ---
 
@@ -158,7 +157,6 @@ Mover failures cause **privilege creep**: *"Alice used to need that access… so
 ### Scenario: Alice Leaves MoneyGuard
 
 HR marks Alice as Terminated, Effective 5:00 PM Today. This is a **security kill-switch event.**
-**
 
 ### The Automation Flow & Tech Stack
 
@@ -202,14 +200,13 @@ If the event-driven architecture breaks, we must prevent identity state drift. W
 
 ---
 
-##  System Design FAQ
+## 🧠 Staff Engineer System Design FAQ
 
 **Q: How do we ensure idempotency in our webhook listeners?**
 **A:** HR systems often fire duplicate webhooks for a single event. Our AWS Lambda/EventBridge listener uses the HR `transaction_id` as an idempotency key against an Amazon DynamoDB table. If the IAM platform receives a duplicate payload, the database rejects the event. Even if it slips through, SCIM operations based on Immutable IDs are inherently idempotent (updating a user to their current state changes nothing).
 
 **Q: In our Birthright provisioning, why do we use Attribute-Based Access Control (ABAC) over Role-Based Access Control (RBAC)?**
 **A:** RBAC relies on static groups and suffers from "role explosion" (e.g., creating a rigid group for `US_Eng_Manager`, `UK_Eng_Manager`, `US_Eng_Intern`). ABAC calculates access dynamically at runtime. We configure a rule: `IF (Department == "Engineering") AND (Location == "US") THEN grant(US_AWS_Profile)`. This scales infinitely better for a growing enterprise.
-**
 
 **Q: How does SCIM handle partial failures or API rate limits on downstream SaaS apps?**
 **A:** When provisioning large cohorts (like 200 summer interns), we hit API rate limits on apps like GitHub or Slack. Okta/SailPoint SCIM integrations utilize message queues with exponential backoff. Failed provisioning tasks are placed in a Dead Letter Queue (DLQ) and retried automatically over 24 hours.
