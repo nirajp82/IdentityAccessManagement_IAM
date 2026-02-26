@@ -1,232 +1,227 @@
-# 📘 The IAM Lifecycle (Joiner · Mover · Leaver)
+# 📘 The IAM Lifecycle Guide (Joiner · Mover · Leaver)
 
-### Context: HR-Driven Identity at *MoneyGuard*
+**Document Owner:** IAM Platform Engineering
 
-The **Joiner–Mover–Leaver (JML)** lifecycle defines how identities are **created, changed, and destroyed** inside an enterprise.
-In a mature IAM program, **HR is the source of truth**, and IAM systems react automatically—without tickets, emails, or manual scripts.
+**Status:** Approved / Active
 
-Your objective as an IAM architect is **zero-touch identity lifecycle automation**, ensuring:
+**Target Architecture:** Hybrid Cloud Identity Model (Zero Trust Aligned)
 
-* Users get access **on time**
-* Access changes **when roles change**
-* Access is removed **instantly when employment ends**
+## 🗺️ High-Level Architecture Diagram
 
-Failures in JML are responsible for **most real-world breaches**.
+```mermaid
+graph TD
+    %% Source of Truth
+    HR[HRIS: Workday] -->|1. Webhook Push Event| EB[AWS EventBridge]
+    
+    %% IAM Engine
+    EB -->|2. Trigger| SP[IGA: SailPoint IdentityNow]
+    
+    %% Core Directory Sync
+    SP -->|3. Provision Base| AD[On-Prem Active Directory]
+    AD -->|4. Cloud Sync| EN[Entra ID / Okta]
+    
+    %% Downstream Provisioning (SCIM)
+    EN -->|5a. SCIM POST/PATCH/DELETE| GH[GitHub EMU]
+    EN -->|5b. SCIM POST/PATCH/DELETE| SL[Slack]
+    EN -->|5c. SAML/OIDC| VPN[Cisco VPN]
+    EN -->|5d. SAML/OIDC| AWS[AWS IAM Identity Center]
+
+    classDef core fill:#2a4365,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef idp fill:#276749,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef target fill:#744210,stroke:#fff,stroke-width:2px,color:#fff;
+    
+    class HR core;
+    class SP,AD,EN idp;
+    class GH,SL,VPN,AWS target;
+
+```
+
+**
 
 ---
 
-## 1️⃣ Joiner — Identity Birth (Provisioning)
+## 🏢 Context: HR-Driven Identity at *MoneyGuard*
+
+The **Joiner–Mover–Leaver (JML)** lifecycle defines how identities are **created, changed, and destroyed** inside our enterprise. In a mature IAM program, **HR is the source of truth**, and IAM systems react automatically—without tickets, emails, or manual scripts.
+
+**The Directional Flow of Truth:**
+
+* **Where it is Created:** The identity is strictly born in the HRIS (Workday). IT does not manually create users.
+* **Where it is Modified:** Changes to core attributes (Title, Department) must happen in the HRIS. The IAM platform detects these deltas and cascades them.
+* **Where it is Destroyed:** HR initiates termination. The IAM platform intercepts this and acts as a universal kill switch across all infrastructure.
+
+Your objective as an IAM Architect is **zero-touch identity lifecycle automation**, ensuring users get access on time, access changes when roles change, and access is removed instantly when employment ends. Failures in JML are responsible for most real-world breaches.
+
+---
+
+## 🏗️ Core IAM Concepts & Technology Stack
+
+Before looking at the JML flow, here is the technology driving it:
+
+* **HRIS (Workday):** The absolute source of truth for employment state.
+* **IGA (SailPoint IdentityNow):** The "Brain." Identity Governance and Administration handles complex separation of duties (SoD), compliance reporting, and cross-system attribute mapping.
+* **IdP (Okta / Entra ID):** The "Bouncer." Handles authentication, SSO federation, and enforcing MFA policies.
+* **Webhooks (Push vs. Pull):** Instead of our IAM system constantly "polling" (asking HR every hour if someone was hired), Workday uses a webhook to "push" an event to AWS EventBridge the exact second a change occurs.
+**
+* **SCIM (System for Cross-domain Identity Management):** An industry-standard HTTP/JSON protocol for automating the exchange of user identity information. It allows us to `POST`, `PATCH`, or `DELETE` users in downstream apps (Slack, GitHub) uniformly without custom API scripts.
+* **Immutable ID (UUID):** A generated string (e.g., `550e8400...`) used as the primary key across all databases. If a user changes their name/email, the UUID remains static, preventing duplicate accounts or state corruption.
+
+---
+
+## 1️⃣ JOINER — Identity Birth (Provisioning)
 
 ### Scenario: Alice Joins MoneyGuard as a Senior Developer
 
-**Trigger (Source of Truth):**
-HR creates Alice’s employee record in Workday with:
+**Trigger (Source of Truth):** HR creates Alice’s employee record in Workday with a Start Date (Feb 1), Department (Engineering), Location (US), and Job Code (Senior Developer). **HR does not open an IT ticket.**
 
-* Start Date: Feb 1
-* Department: Engineering
-* Location: US
-* Job Code: Senior Developer
+### The Automation Flow & Tech Stack
 
-HR does **not** open an IT ticket.
+1. **Detection (Webhook Push):** Workday fires a real-time webhook event to an AWS EventBridge listener, triggering the SailPoint pipeline.
+2. **Identity Creation (Core Directories):**
+* SailPoint provisions the base account into **On-Prem Active Directory** (required for legacy RADIUS/network auth).
+* **Entra Connect (Cloud Sync)** immediately pushes this AD object to **Microsoft Entra ID / Okta** for cloud federation.
+* The **Immutable employee ID** is assigned.
 
----
 
-### IAM Automation Flow
+3. **Birthright Access (Non-Negotiable):**
+* **Okta Group Rules** map Alice's HR attributes (`Dept: Engineering` + `Type: FTE`) to baseline application groups (Corporate email, Slack, VPN, Wiki).
+* **MFA Enrollment** is enforced at the IdP via FIDO2/WebAuthn (YubiKeys/Biometrics) before any app access is allowed.
+* **VPN Access** (Cisco Secure Client) is federated via SAML 2.0 to enforce identical MFA policies.
 
-1. **Detection**
 
-   * IAM platform (e.g., SailPoint or Okta) polls or receives an event from HRIS
+4. **Application Provisioning (SCIM):**
+* Okta pushes a **SCIM 2.0 POST Payload** to apps like GitHub Enterprise Managed Users (EMU). This ensures Alice cannot use her personal GitHub for corporate code.
 
-2. **Identity Creation**
 
-   * Active Directory user created
-   * Synced to cloud directory (Azure AD / Entra ID)
-   * Immutable employee ID assigned
 
-3. **Birthright Access (Non-Negotiable)**
-   Based on *department + employment type*:
+**The SCIM Joiner Payload (POST `/Users`):**
 
-   * Corporate email
-   * Slack access
-   * VPN access
-   * Engineering wiki
-   * MFA enrollment enforced
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+  "externalId": "550e8400-e29b-41d4-a716-446655440000",
+  "userName": "alice.dev@moneyguard.com",
+  "name": {"familyName": "Dev", "givenName": "Alice"},
+  "active": true,
+  "department": "Engineering",
+  "title": "Senior Developer"
+}
 
-4. **Application Provisioning**
+```
 
-   * GitHub org membership
-   * CI/CD access
-   * Dev environment access
-   * All via **SCIM provisioning**
+### Day-1 Experience & Failure Modes
 
----
-
-### Day-1 Experience (Why This Matters)
-
-Alice logs in on Day 1 and everything works.
-
-* No tickets
-* No waiting
-* No insecure temporary passwords
-
-This is not convenience — this is **security through automation**.
+**The Goal:** Alice logs in on Day 1 and everything works. No tickets, no waiting, no insecure temp passwords. This is **security through automation**.
+**Failure Modes:** Manual user creation leading to typos, missed MFA enrollment, over-privileged default access, or shared onboarding spreadsheets. These lead directly to orphaned accounts and audit failures.
 
 ---
 
-### Joiner Failure Mode (What Goes Wrong)
-
-* Manual user creation
-* Missed MFA enrollment
-* Over-privileged default access
-* Shared onboarding spreadsheets
-
-This leads directly to **orphaned accounts and audit failures**.
-
----
-
-### Joiner FAQ
-
-**Q: What is “Birthright Access”?**
-A: A minimal, non-optional access bundle granted to every employee based on verified HR attributes.
-
-**Q: Why not give broad access on Day 1?**
-A: Because joiners are the **highest-risk identities** (new, untrained, phishable).
-
----
-
-## 2️⃣ Mover — Identity Mutation (Change Management)
+## 2️⃣ MOVER — Identity Mutation (Change Management)
 
 ### Scenario: Alice Becomes an Engineering Manager
 
-HR updates Alice’s job profile:
+HR updates Alice’s job profile (Title: Engineering Manager, Reports: 8, Cost Center: Eng Management). This is **not cosmetic** — it is a security event.
 
-* Title: Engineering Manager
-* Reports: 8 developers
-* Cost Center: Engineering Management
+### The Automation Flow & Tech Stack
 
-This change is **not cosmetic** — it is a security event.
+1. **Change Detection:** SailPoint detects the attribute deltas from the Workday webhook.
+2. **Access Grants:** SailPoint triggers SCIM updates to grant access to Management dashboards, Budget tools, and Performance review systems.
+3. **Access Revocation (Most Important Step):** * Removes write access to restricted codebases.
+* Removes break-glass admin eligibility.
+* SailPoint enforces **Separation of Duties (SoD)** to ensure an Eng Manager doesn't retain IC-level production commit rights.
 
----
 
-### IAM Automation Flow
 
-1. **Change Detection**
+**The SCIM Mover Payload (PATCH `/Groups/{id}`):**
 
-   * IAM detects attribute deltas from HR
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "add",
+      "path": "members",
+      "value": [{"value": "alice-uuid-1234"}]
+    }
+  ]
+}
 
-2. **Access Grants**
-
-   * Management dashboards
-   * Budget tools
-   * Performance review systems
-
-3. **Access Revocation (Most Important Step)**
-
-   * Removes write access to restricted codebases
-   * Removes break-glass admin eligibility
-   * Removes individual-contributor entitlements
-
----
+```
 
 ### Why Movers Are Dangerous
 
-Mover failures cause **privilege creep**:
+Mover failures cause **privilege creep**: *"Alice used to need that access… so we never removed it."* Over time, users accumulate toxic combinations of access, making audits fail and breaches inevitable.
 
-> “Alice used to need that access… so we never removed it.”
-
-Over time:
-
-* Users accumulate **toxic combinations**
-* No one understands who has what
-* Audits fail
-* Breaches become inevitable
+> **Best Practice:** Every role change must include access removal — not just access addition. If nothing is removed, your IAM system is broken.
 
 ---
 
-### Mover Best Practice
-
-> **Every role change must include access removal — not just access addition**
-
-If nothing is removed, your IAM system is broken.
-
----
-
-### Mover FAQ
-
-**Q: Why is revocation more important than granting?**
-A: Because excessive access is invisible until exploited.
-
-**Q: Should access changes be instant?**
-A: Yes. Delayed revocation is equivalent to no revocation.
-
----
-
-## 3️⃣ Leaver — Identity Death (Deprovisioning)
+## 3️⃣ LEAVER — Identity Death (Deprovisioning)
 
 ### Scenario: Alice Leaves MoneyGuard
 
-HR marks Alice as:
+HR marks Alice as Terminated, Effective 5:00 PM Today. This is a **security kill-switch event.**
+**
 
-* Status: Terminated
-* Effective Time: 5:00 PM Today
+### The Automation Flow & Tech Stack
 
-This is a **security kill-switch event**.
+1. **Immediate Disable:** AD account disabled, and Cloud identity (Entra/Okta) blocked.
+2. **Session Termination:** OAuth refresh tokens revoked. Active web/mobile sessions killed globally.
+3. **Device Enforcement:** Corporate laptop locked; BYOD data wiped via MDM (Mobile Device Management).
+4. **Downstream Deprovisioning:** SailPoint/Okta blasts a SCIM "Kill" payload to all connected SaaS apps instantly.
 
----
+**The SCIM Leaver Payload (PATCH `/Users/{id}`):**
 
-### IAM Automation Flow
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "replace",
+      "path": "active",
+      "value": false
+    }
+  ]
+}
 
-1. **Immediate Disable**
+```
 
-   * AD account disabled
-   * Cloud identity blocked
+### Enterprise Use Case: Failed Leaver Incident
 
-2. **Session Termination**
-
-   * OAuth refresh tokens revoked
-   * Active web/mobile sessions killed
-
-3. **Device Enforcement**
-
-   * Corporate laptop locked
-   * BYOD data wiped via MDM
-
-4. **Downstream Deprovisioning**
-
-   * SaaS accounts disabled
-   * API tokens revoked
-   * SSH keys invalidated
-
----
-
-### Why Timing Matters
-
-Most insider breaches happen:
-
-* **Within hours of termination**
-* Before manual IT actions occur
-
-Automated deprovisioning removes that window completely.
+**Incident:** A contractor retained VPN access for 3 weeks after exit and copied customer data. Most insider breaches happen within hours of termination, before IT can run manual scripts.
+**Fix:** The automated HR ➔ IAM ➔ SCIM deprovisioning pipeline removes the human-error window completely.
 
 ---
 
-### Leaver FAQ
+## 🚨 Disaster Recovery: State Reconciliation
 
-**Q: Why revoke tokens instead of waiting for expiration?**
-A: Because valid tokens are equivalent to valid credentials.
+**What happens if the Workday Webhook pipeline to AWS EventBridge completely fails?**
 
-**Q: Should access be removed before exit interview?**
-A: Yes. Access removal should precede or coincide with termination notification.
+If the event-driven architecture breaks, we must prevent identity state drift. We utilize a **Full Reconciliation Fallback Strategy**:
+
+1. **Nightly Delta Pulls:** If the webhook listener is down, SailPoint is configured to run a scheduled API pull from Workday every 12 hours, fetching all changes (`updated_at > last_run`).
+2. **Weekly Full Sync:** Every weekend, SailPoint pulls a massive API dump of all active employees from HRIS and compares it against the Active Directory/Okta database.
+3. **Authoritative Override:** If an account exists in Okta but is *not* in the Workday active roster (an orphaned account due to a missed Leaver event), SailPoint will forcefully suspend the Okta account and flag it for security review.
 
 ---
 
-## 🏦 Enterprise Use Case: Failed Leaver Incident
+##  System Design FAQ
 
-**Incident:**
-A contractor retained VPN access for 3 weeks after exit and copied customer data.
+**Q: How do we ensure idempotency in our webhook listeners?**
+**A:** HR systems often fire duplicate webhooks for a single event. Our AWS Lambda/EventBridge listener uses the HR `transaction_id` as an idempotency key against an Amazon DynamoDB table. If the IAM platform receives a duplicate payload, the database rejects the event. Even if it slips through, SCIM operations based on Immutable IDs are inherently idempotent (updating a user to their current state changes nothing).
 
-**Root Cause:**
-HR termination was not integrated with IAM.
+**Q: In our Birthright provisioning, why do we use Attribute-Based Access Control (ABAC) over Role-Based Access Control (RBAC)?**
+**A:** RBAC relies on static groups and suffers from "role explosion" (e.g., creating a rigid group for `US_Eng_Manager`, `UK_Eng_Manager`, `US_Eng_Intern`). ABAC calculates access dynamically at runtime. We configure a rule: `IF (Department == "Engineering") AND (Location == "US") THEN grant(US_AWS_Profile)`. This scales infinitely better for a growing enterprise.
+**
 
-**Fix:**
-HR → IAM → SCIM deprovisioning pipeline enforced with real-time triggers.
+**Q: How does SCIM handle partial failures or API rate limits on downstream SaaS apps?**
+**A:** When provisioning large cohorts (like 200 summer interns), we hit API rate limits on apps like GitHub or Slack. Okta/SailPoint SCIM integrations utilize message queues with exponential backoff. Failed provisioning tasks are placed in a Dead Letter Queue (DLQ) and retried automatically over 24 hours.
+
+**Q: Why are we maintaining On-Prem Active Directory if our target architecture is cloud-native?**
+**A:** Strict legacy network dependencies. While modern web apps use OIDC/SAML via Okta, core networking infrastructure (Cisco ISE for 802.1x office Wi-Fi, older VPN appliances, legacy file shares) still requires RADIUS/LDAP protocols. AD acts as our authoritative on-prem directory, which is then synced upward to Entra ID for the cloud.
+
+**Q: How do we handle race conditions between Identity Creation and Application Provisioning?**
+**A:** By utilizing a state machine (e.g., AWS Step Functions or native SailPoint workflows). We cannot send a SCIM payload to add a user to a GitHub group if the user account hasn't finished replicating in the IdP. The workflow requires a `200 OK` from the core directory creation step before triggering downstream app provisioning.
+
+**Q: Why revoke tokens during offboarding instead of just waiting for them to expire?**
+**A:** Valid tokens are equivalent to valid credentials. If a user is terminated but their AWS CLI STS token or Okta session cookie is valid for another 8 hours, they maintain unrestricted access to infrastructure even after their password is changed. Continuous Access Evaluation (CAE) and immediate token revocation are mandatory.
