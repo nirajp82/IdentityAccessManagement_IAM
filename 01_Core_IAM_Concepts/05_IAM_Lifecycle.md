@@ -48,8 +48,6 @@ Your objective as an IAM Architect is **zero-touch identity lifecycle automation
 
 ## 🏗️ Core IAM Concepts & Technology Stack
 
-## 🏗️ Core IAM Concepts & Technology Stack
-
 To understand how our identity architecture works, imagine our company, *MoneyGuard*, is a strictly regulated FinTech SaaS platform.
 
 Here is how our core technologies interact when a new employee, Alice, is hired:
