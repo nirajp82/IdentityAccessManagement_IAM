@@ -28,10 +28,6 @@ graph TD
 
 ```
 
-**
-
----
-
 ## 🏢 Context: HR-Driven Identity at *MoneyGuard*
 
 The **Joiner–Mover–Leaver (JML)** lifecycle defines how identities are **created, changed, and destroyed** inside our enterprise. In a mature IAM program, **HR is the source of truth**, and IAM systems react automatically—without tickets, emails, or manual scripts.
