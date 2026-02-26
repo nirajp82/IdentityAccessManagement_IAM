@@ -117,14 +117,45 @@ At *MoneyGuard*, we do not treat cloud logins as separate events. We treat the *
 
 ---
 
+
 ## 🌉 The Hybrid Identity Reality (Critical Architecture)
 
-At *MoneyGuard*, identity is split across two worlds that must stay in perfect synchronization. You cannot delete the on-premise world because physical assets (Wi-Fi, laptops) depend on it, and you cannot ignore the cloud world where our SaaS (AWS, Slack) lives. This creates the **Hybrid Identity Model**.
+At **MoneyGuard**, identity exists in two parallel worlds that must remain in perfect synchronization. We cannot eliminate the on-premises world because our physical assets (Wi-Fi, Laptops) require it, and we cannot ignore the cloud world where our SaaS ecosystem (AWS, Slack, O365) lives. This necessitates a **Hybrid Identity Model**.
 
-### 1. The Source of Truth: On-Prem Active Directory (AD)
+### 🏛️ The Hierarchy of Truth: Administrative vs. Technical
 
-* **The Logic:** All identity begins here. When HR hires a new employee, the primary account is created in the local AD.
-* **Why it's the "Truth":** Because AD is integrated with physical assets. It is the most "grounded" version of a user. If a user doesn't exist here, they don't exist in the company's local ecosystem.
+To design this correctly, we must distinguish between the **Origin** of the identity and the **Repository** of the identity.
+
+#### 1. The HRIS (Workday / ADP / BambooHR)
+
+* **The Administrative Source of Truth:** This is the **"Legal Truth."**
+* **The Logic:** If a person isn't in the HRIS, they do not legally work for MoneyGuard. It determines *if* an identity should exist and what its core attributes (Legal Name, Cost Center, Job Title) are.
+* **The Limitation:** HRIS systems are business databases, not network directories. They do not "speak" IT protocols (LDAP/Kerberos) and cannot authenticate a laptop or a server.
+
+#### 2. On-Prem Active Directory (AD)
+
+* **The Technical Source of Truth:** This is the **"Infrastructure Truth."**
+* **The Logic:** AD is our **Primary Technical Repository**. Once the IGA system (SailPoint) reads the "Legal Truth" from HR, it writes that data into AD.
+* **Why it is "The Truth" for IT:** In our hybrid architecture, the Cloud (Okta/Entra ID) does not poll the HRIS directly; it pulls data from **AD**. If a change is made in HR but fails to sync to AD, the rest of the company’s infrastructure will still see the old data. AD is the "grounded" version of the user record.
+
+---
+
+### 💡 The Staff Engineer Breakdown
+
+| Concept | HRIS (Workday/ADP) | Directory (Active Directory) |
+| --- | --- | --- |
+| **Type of Truth** | **Administrative / Legal** | **Technical / Operational** |
+| **Analogy** | Your **Birth Certificate**. | Your **Driver’s License**. |
+| **Function** | Proves you are hired by the company. | Proves to the network you can enter. |
+| **Authority** | The **Origin** of truth. | The **Master Technical Record**. |
+
+### 🔄 The Data Flow at *MoneyGuard*
+
+1. **HRIS (Origin):** Workday triggers the event: *"Alice is hired."*
+2. **IGA (The Brain):** SailPoint processes the business logic and writes Alice's account into **Active Directory**.
+3. **AD (Technical Truth):** Alice now exists on the network. This record is the master version for all technical downstream syncs.
+4. **IdP (Access Plane):** Okta/Entra ID copies the record from AD to the cloud to enable SaaS access.
+
 
 ### 2. The Access Plane: Cloud Directory (Entra ID / Okta)
 
