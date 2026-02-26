@@ -35,10 +35,6 @@ graph LR
 
 ```
 
-**
-
----
-
 ### Context: Where Identity Actually Lives at *MoneyGuard*
 
 An identity is only as secure as **where it is stored and how it is accessed**. Understanding identity repositories is mandatory for designing authentication and authorization architectures correctly. IAM is not just about login screens; it relies entirely on the underlying databases that hold the identity truth.
