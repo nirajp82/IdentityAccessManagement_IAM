@@ -203,7 +203,7 @@ This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Conn
 | **Device Awareness** | Any laptop with a password gets in. | **Compliance Check.** If a laptop is unpatched, the PRT is rejected. |
 
 
-### 🚦 Updated FAQ Entry: The "Smart Badge"
+### 🚦 FAQ
 
 **Q: If Alice stays logged into her laptop, does she have infinite access to Slack and AWS?**
 **A:** **No.** The PRT is not a "permission to stay in"; it is a **"Smart Badge"** used to request entry. Every time Alice opens a new app or her current session expires, her laptop must "tap its badge" (PRT) against the Access Plane (**IdP**). If she is terminated in the HRIS at 2:00 PM, the Access Plane will deactivate her badge. Her 2:05 PM request for a new Slack token will be **rejected**, even though she is still physically sitting at the laptop.
@@ -214,6 +214,12 @@ This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Conn
 **Q: What is the difference between SAML and OIDC for Slack?**
 **A:** Most enterprise Slack setups use **SAML** (XML-based) for the initial login. However, for internal Slack "Apps" or integrations, we often use **OIDC/OAuth2** (JSON-based) to grant specific permissions to a bot or service. Both rely on the same "Access Plane" logic.
 
+**Q: What exactly is the PRT? Is it an Identity Token?**
+**A:** No. Do not confuse the PRT with an OIDC `id_token`. The Primary Refresh Token is a **Device-Bound Refresh Token**. It acts as a **Master SSO Broker** anchored to the laptop's TPM chip. Windows uses it to silently request individual Access Tokens for downstream apps (like Slack or AWS) from the Access Plane.
+
+**Q: What is the TPM chip, and why is it critical for Identity Security?**
+**A:** TPM stands for **Trusted Platform Module**. It is a dedicated, physical security microprocessor built directly into the laptop's motherboard.
+In modern IAM, we use the TPM as an impenetrable hardware vault. Instead of storing sensitive keys (like the PRT) in the computer's standard memory or hard drive—where malware or memory-scraping tools (like Mimikatz) could steal them—the PRT is cryptographically "sealed" inside the TPM. This makes the token **hardware-bound**. Even if an attacker manages to copy the token file, it is completely useless on any other machine.
 ---
 ## 🌉 The Hybrid Identity Reality (Critical Architecture)
 
