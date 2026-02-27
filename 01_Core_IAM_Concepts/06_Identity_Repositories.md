@@ -220,6 +220,7 @@ This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Conn
 **Q: What is the TPM chip, and why is it critical for Identity Security?**
 **A:** TPM stands for **Trusted Platform Module**. It is a dedicated, physical security microprocessor built directly into the laptop's motherboard.
 In modern IAM, we use the TPM as an impenetrable hardware vault. Instead of storing sensitive keys (like the PRT) in the computer's standard memory or hard drive—where malware or memory-scraping tools (like Mimikatz) could steal them—the PRT is cryptographically "sealed" inside the TPM. This makes the token **hardware-bound**. Even if an attacker manages to copy the token file, it is completely useless on any other machine.
+
 ---
 ## 🌉 The Hybrid Identity Reality (Critical Architecture)
 
