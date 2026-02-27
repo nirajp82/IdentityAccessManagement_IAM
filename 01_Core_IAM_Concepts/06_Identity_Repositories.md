@@ -92,6 +92,51 @@ At *MoneyGuard*, we do not treat cloud logins as separate events. We treat the *
 * **The Technical Flow:** Alice logs into her Windows laptop (bound to the Technical Truth/AD). When she opens Outlook, the laptop provides a **Primary Refresh Token (PRT)** to the Access Plane. The Plane validates her "Active" state and device health, then silently issues an access token.
 * **The Experience:** Zero password prompts. The Access Plane handles the handshake behind the scenes because it already trusts the initial login.
 
+- ### ⚙️ The Technical Flow: From On-Prem Login to Cloud Token
+
+##### 1. Phase A: The Dual-Proof (The Initial Login)
+
+When Alice sits at her desk and logs into her Windows laptop:
+
+* **On-Premise (Legacy):** The laptop sends Alice’s credentials to the **Local Domain Controller (AD)** via Kerberos. This unlocks the physical hardware and local file shares.
+* **Cloud (Modern):** Simultaneously, the Windows "Web Account Manager" (WAM) reaches out to the **Access Plane**. It says: *"Alice just passed a local Windows Hello check on this managed, domain-joined laptop. Here is the proof."*
+
+#### 2. Phase B: Minting the PRT (The Master Key)
+
+If the Access Plane confirms Alice is active and the device is healthy, it issues a **Primary Refresh Token (PRT)**.
+
+* **Hardware Binding:** This token is mathematically tied to the laptop’s **TPM chip**. If a hacker steals the token file, it is useless on any other computer.
+* **Session State:** The PRT contains "claims"—it knows Alice used MFA and that her laptop is encrypted.
+
+#### 3. Phase C: The "Silent" Handshake (Requesting Access)
+
+Alice opens Outlook or a Microservice dashboard.
+
+* **The Request:** Outlook tells Windows: *"I need to talk to the Cloud."*
+* **The Presentation:** Windows pulls the **PRT** from the secure TPM chip and presents it to the Access Plane.
+* **The Validation:** The Access Plane sees the PRT and thinks: *"I issued this badge 4 hours ago. It’s still valid, and Alice hasn't been fired. Here is a 1-hour 'Access Token' specifically for Outlook."*
+* **The Experience:** Alice never sees a login box. The handshake happens in milliseconds in the background.
+
+### 🕵️‍♂️ Why this is a Staff Engineer "Must-Have"
+
+| Feature | Legacy Authentication (Kerberos) | Modern Access Plane (PRT) |
+| --- | --- | --- |
+| **Trust Model** | Trust is "Once and Done" at login. | Trust is **Continuous**. Every app request re-validates the PRT. |
+| **Revocation** | Hard to kill a session without a reboot. | **Instant.** If Alice is terminated, the Access Plane rejects the PRT immediately. |
+| **Device Awareness** | Doesn't care if the laptop is patched. | **Mandatory.** The PRT won't work if the device is "Non-Compliant." |
+
+### 🚦 Updated FAQ Entry: The "Kill-Switch"
+
+**Q: If Alice stays logged into her laptop for 24 hours, does she have 24 hours of cloud access?**
+**A:** **No.** This is the core benefit of the Access Plane. The PRT is not a "permission to stay in"; it is a "permission to ask for a ticket."
+
+Every time Alice opens a new app or her current session expires (usually every hour), her laptop must "show the badge" (PRT) to the Access Plane. If the IAM team disables her account at 2:00 PM, her 2:05 PM request for a new Slack token will be **rejected**, even though she is still physically logged into Windows. The "Access Plane" is the active judge of every single request.
+
+### 💡 The "Smart Badge" Mental Model
+
+Alice shows her ID once at the front desk to get a **Smart Badge (PRT)**.
+As she walks through the building, every door (App) has a scanner. She doesn't re-show her ID; she just taps her badge. But the second the Security Office deactivates her badge in the system, **no door in the building will open for her again**, regardless of where she is standing.
+
 #### 2. Federated SaaS Apps (Slack, GitHub, Zoom)
 
 * **How it's used:** These applications are "Federated," meaning they do not store Alice’s password. They outsource (federate) their security to *MoneyGuard's* Access Plane.
