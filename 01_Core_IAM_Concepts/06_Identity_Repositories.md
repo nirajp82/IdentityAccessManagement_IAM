@@ -96,8 +96,45 @@ This is the primary way our users interact with the cloud. It bridges the gap be
 3. **Phase C (The Silent Request):** Alice opens Outlook. Outlook asks Windows for a session. Windows pulls the **PRT** from the TPM and presents it to the Access Plane.
 4. **Phase D (The Grant):** The Access Plane validates the PRT and her device health. It silently issues a short-lived **Access Token** to Outlook.
 
-
 * **The Experience:** Alice never sees a password prompt. The laptop and the Access Plane handle the trust relationship in the background.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor A as Alice
+    participant L as Windows Laptop (OS)
+    participant TPM as Laptop TPM Chip (Hardware)
+    participant AD as On-Prem AD (Domain Controller)
+    participant AP as Cloud Access Plane (IdP)
+    participant O as Outlook App
+
+    Note over A, L: Phase A: Initial Proof (Login)
+    A->>L: Alice provides Credentials (PIN/Hello/Pass)
+    par Classic AD Handshake
+        L->>AD: Validate Credentials (Kerberos/NTLM)
+        AD-->>L: Success (Machine Unlocked)
+    and Simultaneous Cloud Notification
+        L->>AP: Cloud Auth Request (Proving local hardware login occurred)
+    end
+
+    Note over AP, TPM: Phase B: Minting the PRT
+    AP->>AP: Validate User Status & Device Compliance
+    AP-->>L: Issue Primary Refresh Token (PRT)
+    L->>TPM: Cryptographically "Seal" PRT to Hardware (Non-exportable)
+
+    Note over A, AP: Phase C: The Silent Request
+    A->>O: Alice opens Outlook
+    O->>L: Request O365 Session
+    L->>TPM: Unseal PRT
+    L->>AP: Present PRT + Device Health Claims
+
+    Note over AP, O: Phase D: The Grant
+    AP->>AP: Validate PRT & Continuous Access Policies
+    AP-->>L: Issue short-lived Access Token (for Outlook only)
+    L-->>O: Pass Access Token
+    Note over A, O: SSO Complete - Zero Password Prompts
+
+```
 
 #### 2. Federated SaaS Apps (Slack)
 
