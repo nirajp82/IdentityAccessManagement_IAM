@@ -102,38 +102,41 @@ This is the primary way our users interact with the cloud. It bridges the gap be
 sequenceDiagram
     autonumber
     actor A as Alice
-    participant L as Windows Laptop (OS)
-    participant TPM as Laptop TPM Chip (Hardware)
-    participant AD as On-Prem AD (Domain Controller)
-    participant AP as Cloud Access Plane (IdP)
-    participant O as Outlook App
+    participant L as Laptop (OS & TPM)
+    participant AD as On-Prem AD (Technical Truth)
+    participant AP as Access Plane (Cloud IdP)
+    participant O as Office 365 (Native App)
+    participant S as Slack (Federated SP)
 
-    Note over A, L: Phase A: Initial Proof (Login)
-    A->>L: Alice provides Credentials (PIN/Hello/Pass)
-    par Classic AD Handshake
-        L->>AD: Validate Credentials (Kerberos/NTLM)
-        AD-->>L: Success (Machine Unlocked)
-    and Simultaneous Cloud Notification
-        L->>AP: Cloud Auth Request (Proving local hardware login occurred)
+    rect rgb(30, 41, 59)
+    Note over A, AP: PHASE 1: The Initial Login & PRT Minting
+    A->>L: 1. Enters Password / Windows Hello
+    L->>AD: 2. Validate Credentials (Kerberos)
+    AD-->>L: 3. Local Unlock Success
+    L->>AP: 4. Proves local auth & requests Cloud Key
+    AP-->>L: 5. Issues PRT (Saved to hardware TPM chip)
     end
 
-    Note over AP, TPM: Phase B: Minting the PRT
-    AP->>AP: Validate User Status & Device Compliance
-    AP-->>L: Issue Primary Refresh Token (PRT)
-    L->>TPM: Cryptographically "Seal" PRT to Hardware (Non-exportable)
+    rect rgb(15, 23, 42)
+    Note over A, O: PHASE 2: Native Cloud Access (Office 365)
+    A->>O: 6. Opens Outlook
+    O->>L: 7. Request Session
+    L->>AP: 8. Presents PRT silently (No password prompt)
+    AP-->>O: 9. Issues short-lived Access Token
+    Note over A, O: Outlook opens instantly.
+    end
 
-    Note over A, AP: Phase C: The Silent Request
-    A->>O: Alice opens Outlook
-    O->>L: Request O365 Session
-    L->>TPM: Unseal PRT
-    L->>AP: Present PRT + Device Health Claims
-
-    Note over AP, O: Phase D: The Grant
-    AP->>AP: Validate PRT & Continuous Access Policies
-    AP-->>L: Issue short-lived Access Token (for Outlook only)
-    L-->>O: Pass Access Token
-    Note over A, O: SSO Complete - Zero Password Prompts
-
+    rect rgb(30, 41, 59)
+    Note over A, S: PHASE 3: Federated SaaS Access (Slack)
+    A->>S: 10. Opens moneyguard.slack.com
+    S->>AP: 11. Redirects to IdP (SAML AuthnRequest)
+    AP->>L: 12. Challenge for Auth
+    L->>AP: 13. Presents PRT silently
+    AP->>AP: 14. Generates & Digitally Signs SAML Token
+    AP-->>S: 15. Passes Signed Token to Slack
+    S->>S: 16. Verifies Signature using Public Key
+    Note over A, S: Slack opens instantly. Password never leaves MoneyGuard.
+    end
 ```
 
 #### 2. Federated SaaS Apps (Slack)
