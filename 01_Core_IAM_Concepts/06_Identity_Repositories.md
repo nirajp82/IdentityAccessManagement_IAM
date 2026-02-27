@@ -105,40 +105,58 @@ sequenceDiagram
     participant L as Laptop (OS & TPM)
     participant AD as On-Prem AD (Technical Truth)
     participant AP as Access Plane (Cloud IdP)
-    participant O as Office 365 (Native App)
-    participant S as Slack (Federated SP)
+    participant O365 as Office 365 (Native)
+    participant Slack as Slack (SAML SP)
+    participant AWS as AWS Console (Federated Role)
+    participant API as Microservice (OIDC/JWT)
 
     rect rgb(30, 41, 59)
-    Note over A, AP: PHASE 1: The Initial Login & PRT Minting
-    A->>L: 1. Enters Password / Windows Hello
-    L->>AD: 2. Validate Credentials (Kerberos)
-    AD-->>L: 3. Local Unlock Success
-    L->>AP: 4. Proves local auth & requests Cloud Key
-    AP-->>L: 5. Issues PRT (Saved to hardware TPM chip)
+    Note over A, AP: PHASE 1: Initial Login & PRT Minting
+    A->>L: Enters Password / Windows Hello
+    L->>AD: Validate Credentials (Kerberos)
+    AD-->>L: Local Unlock Success
+    L->>AP: Prove local auth & request Cloud Key
+    AP-->>L: Issue PRT (Saved to hardware TPM chip)
     end
 
     rect rgb(15, 23, 42)
-    Note over A, O: PHASE 2: Native Cloud Access (Office 365)
-    A->>O: 6. Opens Outlook
-    O->>L: 7. Request Session
-    L->>AP: 8. Presents PRT silently (No password prompt)
-    AP-->>O: 9. Issues short-lived Access Token
-    Note over A, O: Outlook opens instantly.
+    Note over A, O365: PHASE 2: Native Microsoft Access
+    A->>O365: Opens Outlook
+    O365->>AP: Request Session
+    L->>AP: Presents PRT silently
+    AP-->>O365: Issues short-lived Access Token
     end
 
     rect rgb(30, 41, 59)
-    Note over A, S: PHASE 3: Federated SaaS Access (Slack)
-    A->>S: 10. Opens moneyguard.slack.com
-    S->>AP: 11. Redirects to IdP (SAML AuthnRequest)
-    AP->>L: 12. Challenge for Auth
-    L->>AP: 13. Presents PRT silently
-    AP->>AP: 14. Generates & Digitally Signs SAML Token
-    AP-->>S: 15. Passes Signed Token to Slack
-    S->>S: 16. Verifies Signature using Public Key
-    Note over A, S: Slack opens instantly. Password never leaves MoneyGuard.
+    Note over A, Slack: PHASE 3: Federated SaaS Access (Slack)
+    A->>Slack: Opens moneyguard.slack.com
+    Slack->>AP: Redirects to IdP (SAML AuthnRequest)
+    L->>AP: Presents PRT silently
+    AP->>AP: Generates & Digitally Signs SAML Token
+    AP-->>Slack: Passes Signed Token (Signature Verified)
     end
-```
 
+    rect rgb(15, 23, 42)
+    Note over A, AWS: PHASE 4: Cloud Infrastructure (AWS)
+    A->>AWS: Clicks "AWS Console" in SSO Portal
+    AWS->>AP: Redirects to IdP
+    L->>AP: Presents PRT silently
+    AP->>AP: Maps AD Group to AWS IAM Role
+    AP-->>AWS: Passes Assertion
+    AWS-->>A: Grants Temporary AWS Session (e.g., 1 Hour)
+    end
+
+    rect rgb(30, 41, 59)
+    Note over A, API: PHASE 5: Custom Microservices (.NET/Node)
+    A->>API: Frontend Dashboard requests data
+    API->>AP: Requests Auth Token
+    L->>AP: Presents PRT silently
+    AP-->>API: Issues JWT (JSON Web Token) with Scopes
+    API->>API: Validates Access Plane's Digital Signature
+    API-->>A: Returns Secure Data
+    end
+
+```
 #### 2. Federated SaaS Apps (Slack)
 
 For external apps like Slack, the Access Plane acts as the **IdP** (Identity Provider) and Slack acts as the **SP** (Service Provider). Slack doesn't store Alice's password; it trusts *MoneyGuard's* signature.
