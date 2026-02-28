@@ -197,24 +197,66 @@ In enterprise security, the Enforcement Layer is broken into two components defi
 
 ---
 
-## 5. Deep Dive: Cryptographic Trust (How Systems Validate Tokens)
+### 5. Deep Dive: Cryptographic Trust (How Systems Validate Tokens)
 
-A critical question in Zero-Trust is: *How do these systems mathematically prove a token isn't just a forged string of text made by a hacker?*
+#### A. How the IAM Control Plane Validates the Source (Client Authentication)
 
-### A. How the IAM Control Plane Validates the Source (Client Auth)
+When the Client App (the backend server for `teller.moneyguard.com`) asks for a token in Step C, it doesn't just ask nicely. It must mathematically prove its identity to `auth.moneyguard.com`.
 
-When the Teller App asks for a token in Step C, how does `auth.moneyguard.com` know it's the real app?
+* **Client Registration (The Setup):** Long before Alice ever logs in, the developers of the Teller App registered their application with the IAM Control Plane. The IAM system generated a unique `client_id` (like a username, e.g., `app_teller_prod_01`) and a highly secure `client_secret` (like a 64-character password known *only* to the Teller App's backend server).
+* **The Secure POST Request (The Check):** When exchanging the code, the Teller App backend makes a secure, server-to-server POST request to the IAM Control Plane. It sends its ID and Secret using an `Authorization: Basic` header (which is a base64-encoded string of the ID and Secret).
 
-* **Client Registration:** Long before Alice ever logs in, the developers of the Teller App registered their application with the IAM Control Plane, receiving a unique `client_id` and a highly secure `client_secret`.
-* **The Check:** When exchanging the code, the Teller App backend sends its `client_secret`. The IAM Control Plane checks its database. If the secret matches the ID, the IAM Control Plane knows with 100% certainty the request came from the legitimate Teller App backend, and it issues the JWT.
+**The Exact HTTP Request:**
 
-### B. How the PEP (API Gateway) Validates the Token (JWKS)
+```http
+POST /oauth2/token HTTP/1.1
+Host: auth.moneyguard.com
+# This header proves the request is coming from the legitimate Teller App backend
+Authorization: Basic YXBwX3RlbGxlcl9wcm9kXzAxOnN1cGVyX3NlY3JldF9wYXNzd29yZF8xMjM=
+Content-Type: application/x-www-form-urlencoded
 
-When Alice's browser sends the JWT to `api.moneyguard.com`, how does the Gateway know the token wasn't forged without calling the IAM Control Plane every time?
+grant_type=authorization_code&code=SplxlOBeZQQYbYS6WxSbIA&redirect_uri=https://teller.moneyguard.com/callback
 
-* **Signing the Token:** When the IAM Control Plane generates the JWT, it signs it using a highly guarded **Private Key** (e.g., RSA-256).
-* **Publishing the Public Key:** The IAM Control Plane publishes the mathematical counterpart—the **Public Key**—at a public URL, usually `auth.moneyguard.com/.well-known/jwks.json`.
-* **The Cryptographic Math:** The API Gateway downloads and caches this Public Key. When a request comes in, the API Gateway runs a cryptographic math algorithm using the Public Key against the token's signature. **If the signature was created by anything other than the IAM Control Plane's Private Key, the math fails**, and the API Gateway instantly rejects it as a forgery.
+```
+
+* **The Result:** The IAM Control Plane checks its database. Because the `client_secret` perfectly matches the `client_id` for the Teller App, `auth.moneyguard.com` knows with 100% certainty that the request came from the legitimate app server, not a hacker's laptop.
+
+#### B. How the IAM Control Plane Validates the Code (IdP Trust)
+
+The IAM Control Plane (`auth.moneyguard.com`) just received the code `SplxlOBeZQQYbYS6WxSbIA` from the Teller App. The IAM Control Plane did *not* generate this code—the IdP (`idp.moneyguard.com`) did.
+
+To verify it, MoneyGuard uses a **Backend Federation Check** (Server-to-Server Trust).
+
+1. **The Code arrives at the IAM Control Plane:** `auth.moneyguard.com` pauses the token generation process. It looks at the code and says, *"I need to verify this with the IdP."*
+2. **The Hidden Backend Call:** The IAM Control Plane makes a highly secure, private API call over the internal bank network directly to the Identity Provider's backend API.
+```http
+POST /api/v1/verify-code HTTP/1.1
+Host: internal-idp.moneyguard.local
+Authorization: Bearer <iam_internal_system_token>
+
+{
+  "code": "SplxlOBeZQQYbYS6WxSbIA"
+}
+
+```
+
+
+3. **The IdP Responds:** The IdP (`idp.moneyguard.com`) checks its own short-term database. It replies to the IAM Control Plane:
+```json
+{
+  "valid": true,
+  "authenticated_user": "alice.smith@moneyguard.com",
+  "mfa_passed": true,
+  "time_issued": "2026-02-28T17:00:00Z"
+}
+
+```
+
+
+4. **The IAM Control Plane takes over:** Now that `auth.moneyguard.com` has cryptographic proof from the IdP that the code is real and belongs to Alice, it throws the code away. It looks up Alice in its own Identity Store, pulls her `WealthManager` roles, generates the final JWT, and sends it back to the Teller App.
+
+*(Note: In some cloud-native architectures, instead of making an API call, the IdP and the IAM Control Plane might share a highly secure, internal Redis database cache. The IdP writes the code to Redis, and the IAM Control Plane reads it directly from Redis to verify it instantly).*
+
 
 ### C. How the PDP Validates Context
 
