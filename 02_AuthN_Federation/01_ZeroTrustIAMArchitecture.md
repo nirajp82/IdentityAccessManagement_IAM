@@ -490,11 +490,13 @@ public class OpaResponse
 ## 9. End-to-End Example Flow Summary (Human User)
 
 1. **Initiation:** Alice opens `wealth.moneyguard.com`.
-2. **Authentication (IdP):** She is redirected to `idp.moneyguard.com`, logs in, and passes MFA. The IdP redirects her browser back to the app with an Auth Code.
-3. **Authorization (IAM):** The web app backend sends the Auth Code to `auth.moneyguard.com`. The IAM Control Plane verifies her, assigns the `wealth_manager` role based on her Identity Store profile, and returns a signed JWT.
-4. **The API Call:** Alice clicks "Send Wire". Her browser sends a POST request to `api.moneyguard.com/v1/wires` with her secure HttpOnly cookie containing the JWT.
-5. **Enforcement (PEP/PDP):** The .NET API Gateway middleware intercepts the request. It mathematically verifies the JWT signature against the public JWKS keys. It then asks the OPA PDP to evaluate the Rego policy. The PDP checks the token claims, the IP, and the amount, and responds: `{"result": true}`.
-6. **Execution:** The Gateway forwards the request to the internal Microservice, which safely processes the transfer.
+2. **Authentication (IdP):** She is redirected to `idp.moneyguard.com`, logs in, and passes MFA. The IdP redirects her browser back to the app with a temporary Auth Code (`?code=xyz`).
+3. **Authorization (IAM):** The web app backend sends the Auth Code to `auth.moneyguard.com` along with its `client_id` and `client_secret`. The IAM Control Plane performs a **backend federation check** directly with the IdP to ensure the code is legitimate. Once verified, it looks up Alice in the Identity Store, assigns her the `wealth_manager` role, and returns a signed JWT Access Token.
+4. **The 1st API Call (Wire Transfer):** Alice clicks "Send Wire". Her browser sends a POST request to `api.moneyguard.com/v1/wires` with her secure HttpOnly cookie containing the JWT.
+5. **Enforcement (PEP/PDP):** The .NET API Gateway middleware intercepts the request. It mathematically verifies the JWT signature against its locally cached public JWKS keys. It then hands the decoded token to the OPA PDP to evaluate the Rego policy. The PDP checks the token claims, the IP, and the amount, and responds: `{"result": true}`.
+6. **Execution:** The Gateway forwards the request to the internal Wire Transfer Microservice, which safely processes the transfer.
+7. **The 2nd API Call (Account Balance):** A few minutes later, Alice navigates to a new page to view client funds. Her browser sends a GET request to `api.moneyguard.com/v1/account-balances` using the *same* active JWT.
+8. **Stateless Enforcement (Bypassing IdP/IAM):** The API Gateway intercepts this second request. It does *not* contact the IAM Control Plane or the IdP. It instantly verifies the JWT signature and expiration locally. It asks the PDP to evaluate the specific rules for the `/v1/account-balances` endpoint. The PDP allows it, and the Gateway instantly routes the request to the Account Microservice.
 ----
 
 ## 10. Deep Dive: Machine-to-Machine (M2M) Zero-Trust Flow
