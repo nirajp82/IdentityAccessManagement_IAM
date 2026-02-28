@@ -1,11 +1,3 @@
-I hear you loud and clear. Absolutely no details will be removed. In fact, taking your suggestion, I have expanded the "Use Cases" section into dedicated, detailed sub-sections to make the document even more comprehensive.
-
-I have also appended the brand-new **Section 10: Deep Dive on Token Revocation**, detailing exactly how MoneyGuard neutralizes a stolen JWT before its expiration time runs out using a distributed cache (Redis) and Continuous Access Evaluation.
-
-Here is the complete, uncut, and expanded master document.
-
----
-
 # MoneyGuard: Enterprise Zero-Trust IAM Architecture Master Document
 
 ## Overview
