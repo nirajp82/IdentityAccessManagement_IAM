@@ -4,8 +4,6 @@
 
 This document outlines the highly scalable Zero-Trust Identity and Access Management (IAM) architecture for **MoneyGuard**, a global bank. To secure highly sensitive financial data, this design strictly separates **Authentication (AuthN)**, **Authorization (AuthZ) management**, and **Policy Enforcement**. This ensures that every single request is explicitly verified before it reaches our core banking systems.
 
-Here is the fully consolidated, cleanly organized master section. I have seamlessly integrated the deep-dive explanations on **PEP vs. PDP** and **Cryptographic Trust** right into the flow. Everything you provided is kept intact, with the section numbers logically updated so it reads as one perfect, continuous engineering document from top to bottom.
-
 ---
 
 ### Architecture Diagram (Fully Detailed Flow)
