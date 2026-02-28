@@ -259,7 +259,63 @@ sequenceDiagram
 
 ---
 
-## 6. Policy Enforcement: Open Policy Agent (Rego)
+## 6. Deep Dive: How the IAM Control Plane Knows User Roles & Attributes
+
+A common gap in understanding IAM is assuming the IAM Control Plane "magically" knows who is a Wealth Manager, or what department they work in. In a massive bank like MoneyGuard, this data originates entirely outside the IAM system.
+
+It works via a pipeline of **Provisioning (SCIM)** and **Claims Mapping**.
+
+### Step 1: The Source of Truth (HR Systems)
+
+The absolute master record for any employee is the Human Resources system (e.g., Workday or SAP SuccessFactors). When Alice is hired, HR creates her profile:
+
+* `Job Title:` Senior Wealth Manager
+* `Department:` Private Banking
+* `Cost Center:` 8472
+
+### Step 2: Provisioning via SCIM
+
+The HR system is securely linked to the IAM Control Plane (`iam.moneyguard.com`) via a protocol called **SCIM (System for Cross-domain Identity Management)**.
+Whenever HR updates a profile, Workday instantly sends a JSON payload to the IAM Control Plane's SCIM API.
+
+*Workday's POST request to MoneyGuard IAM:*
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+  "userName": "alice@moneyguard.com",
+  "active": true,
+  "title": "Senior Wealth Manager",
+  "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+    "department": "Private Banking",
+    "manager": {"value": "26118915-6090-4610-87e4-49d8ca9f808d"}
+  }
+}
+
+```
+
+### Step 3: The Identity Store
+
+The IAM Control Plane receives this SCIM payload and saves it into its internal database, called the **Identity Store** (often backed by Active Directory, LDAP, or a cloud directory). The IAM system now physically holds Alice's attributes.
+
+### Step 4: Just-In-Time Claims Mapping
+
+Fast forward to Alice logging into the Teller App. In Step C of the OAuth flow, the app requests a token from the `Token Service`. Here is what happens in the millisecond before the JWT is generated:
+
+1. The Token Service looks up `alice@moneyguard.com` in the Identity Store.
+2. It pulls her raw attributes (`title: "Senior Wealth Manager"`, `department: "Private Banking"`).
+3. The Token Service uses a **Claims Mapper** (a set of rules defined by IAM admins) to translate HR titles into application roles.
+* *Mapper Rule:* `IF Title CONTAINS "Wealth Manager" THEN Add Role "wealth_manager"`
+* *Mapper Rule:* `IF Department == "Private Banking" THEN Add Attribute "clearance_level: 3"`
+
+
+4. The Token Service injects these mapped results into the final JWT payload (called "claims"), signs the token cryptographically, and hands it back to the Client App.
+
+Now, when Alice makes an API call, the PDP reads the `wealth_manager` claim inside her token, entirely unaware of the HR systems that originally facilitated it.
+
+---
+
+## 7. Policy Enforcement: Open Policy Agent (Rego)
 
 When the API Gateway (PEP) intercepts a request to `api.moneyguard.com/v1/wires`, it sends the parsed JWT to the Open Policy Agent (PDP). Here is how MoneyGuard writes an ABAC policy in **Rego** to evaluate Alice's wire transfer request:
 
@@ -298,7 +354,7 @@ is_corporate_ip(ip) if {
 
 ---
 
-## 7. .NET Implementation Example (Enforcement Layer)
+## 8. .NET Implementation Example (Enforcement Layer)
 
 Here is how MoneyGuard's Enforcement Layer (built on **ASP.NET Core**) intercepts the incoming API request, extracts the JWT, and calls the Open Policy Agent (PDP) before allowing the request to hit the core banking controllers.
 
@@ -377,16 +433,17 @@ public class OpaResponse
 
 ---
 
-## 8. End-to-End Example Flow Summary (Human User)
+## 9. End-to-End Example Flow Summary (Human User)
 
 1. **Initiation:** Alice opens `wealth.moneyguard.com`.
 2. **Authentication (IdP):** She is redirected to `idp.moneyguard.com`, logs in, and passes MFA. The IdP redirects her browser back to the app with an Auth Code.
-3. **Authorization (IAM):** The web app backend sends the Auth Code to `auth.moneyguard.com`. The IAM Control Plane verifies her, assigns the `wealth_manager` role, and returns a JWT.
+3. **Authorization (IAM):** The web app backend sends the Auth Code to `auth.moneyguard.com`. The IAM Control Plane verifies her, assigns the `wealth_manager` role based on her Identity Store profile, and returns a signed JWT.
 4. **The API Call:** Alice clicks "Send Wire". Her browser sends a POST request to `api.moneyguard.com/v1/wires` with her secure HttpOnly cookie containing the JWT.
-5. **Enforcement (PEP/PDP):** The .NET API Gateway middleware intercepts the request. It asks the OPA PDP to evaluate the Rego policy. The PDP checks the token, the IP, and the amount, and responds: `{"result": true}`.
+5. **Enforcement (PEP/PDP):** The .NET API Gateway middleware intercepts the request. It mathematically verifies the JWT signature against the public JWKS keys. It then asks the OPA PDP to evaluate the Rego policy. The PDP checks the token claims, the IP, and the amount, and responds: `{"result": true}`.
 6. **Execution:** The Gateway forwards the request to the internal Microservice, which safely processes the transfer.
+----
 
-## 7. Deep Dive: Machine-to-Machine (M2M) Zero-Trust Flow
+## 10. Deep Dive: Machine-to-Machine (M2M) Zero-Trust Flow
 
 What happens when there is no human involved? For example, when the internal `Mobile Deposit Service` needs to record a transaction in the `Core Ledger Service`.
 
