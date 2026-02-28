@@ -9,51 +9,57 @@ This document outlines the highly scalable Zero-Trust Identity and Access Manage
 ### Architecture Diagram (Fully Detailed Flow)
 
 ```mermaid
-flowchart LR
-    %% Define User/Client Node
-    US["👤 User Browser & Client App<br>(e.g., teller.moneyguard.com)"]
+sequenceDiagram
+    autonumber
 
-    %% Define Subgraphs with Details
-    subgraph IDP_Layer ["Identity Provider (IdP)"]
-        direction TB
-        IDP["idp.moneyguard.com<br>(Backed by Okta/AzureAD)"]
-        IDP_Features["• OIDC / OAuth2 / SAML<br>• MFA (Biometrics/Push)<br>• Corporate Federation"]
-        IDP -.- IDP_Features
+    %% Define Architectural Groupings (Boxes)
+    box Client Environment
+    participant US as 👤 User Browser & Client App<br>(teller.moneyguard.com)
     end
 
-    subgraph IAM_Layer ["IAM Control Plane"]
-        direction TB
-        IAM["auth.moneyguard.com<br>iam.moneyguard.com"]
-        IAM_Features["• Identity Store (Active Directory)<br>• RBAC/ABAC Engine<br>• Token Service (OAuth2)<br>• SCIM (HR Sync)"]
-        IAM -.- IAM_Features
+    box Identity Provider (IdP)
+    participant IDP as idp.moneyguard.com<br>(MFA, OIDC, Federation)
     end
 
-    subgraph ENF_Layer ["Enforcement Layer"]
-        direction TB
-        ENF["api.moneyguard.com<br>API Gateway (PEP)"]
-        PDP["Policy Decision Point (PDP)<br>(Open Policy Agent)"]
-        ENF <-->|"5b. PEP verifies JWKS signature.<br>PDP evaluates ABAC rules."| PDP
+    box IAM Control Plane
+    participant IAM as auth.moneyguard.com<br>(Identity Store, Token Svc)
     end
 
-    subgraph RES_Layer ["Protected Resources"]
-        direction TB
-        RES["🏦 Core Banking Microservices<br>(e.g., /v1/wire-transfers)"]
+    box Enforcement Layer
+    participant PEP as api.moneyguard.com<br>API Gateway (PEP)
+    participant PDP as Open Policy Agent<br>(PDP)
     end
 
-    %% Define the Step-by-Step Flow with URLs and Redirections
-    US -->|"1. User accesses teller.moneyguard.com<br>App redirects browser to<br>idp.moneyguard.com/authorize"| IDP
+    box Protected Resources
+    participant RES as Core Microservices<br>(/v1/wire-transfers)
+    end
+
+    %% Step-by-Step Flow
+    Note over US, IDP: Phase 1: Authentication
+    US->>IDP: 1. User accesses app. Browser redirects to idp.moneyguard.com/authorize
+    IDP-->>US: 2. User logs in & passes MFA. IdP redirects back with ?code=xyz
     
-    IDP -->|"2. User logs in & passes MFA.<br>IdP redirects browser back to<br>teller.moneyguard.com/callback?code=xyz"| US
+    Note over US, IAM: Phase 2: Secure Token Exchange
+    US->>IAM: 3. App Backend calls POST /oauth2/token (using code, client_id, client_secret)
     
-    US -->|"3. App Backend silently calls<br>POST auth.moneyguard.com/oauth2/token<br>using code, client_id & client_secret"| IAM
+    rect rgb(60, 60, 60)
+    IAM->>IDP: 3b. Backend Federation Check: IAM verifies 'code=xyz' directly with IdP
+    IDP-->>IAM: Valid. Code belongs to Alice.
+    end
     
-    IAM -.->|"3b. Backend Federation Check:<br>IAM verifies 'code=xyz' directly with IdP"| IDP
+    IAM-->>US: 4. IAM generates & returns signed JWT Access Token to Client App
     
-    IAM -->|"4. IAM generates & returns<br>signed JWT Access Token to Client App"| US
+    Note over US, RES: Phase 3: Zero-Trust API Call & Enforcement
+    US->>PEP: 5. App makes API Call to POST /v1/wires with JWT (Bearer Token)
     
-    US -->|"5. App makes API Call to<br>POST api.moneyguard.com/v1/wires<br>with JWT (Bearer Token / Cookie)"| ENF
+    rect rgb(60, 60, 60)
+    PEP->>PDP: 5b. PEP verifies JWKS signature. Hands to PDP to evaluate ABAC rules.
+    PDP-->>PEP: ALLOW Decision
+    end
     
-    ENF -->|"6. If PDP ALLOWS,<br>Gateway forwards authorized request"| RES
+    PEP->>RES: 6. Gateway forwards authorized request
+    RES-->>US: 200 OK (Wire Processed Successfully)
+
 ```
 
 ## 1. Architecture Modules in Detail
