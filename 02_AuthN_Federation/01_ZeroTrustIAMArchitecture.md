@@ -4,18 +4,41 @@
 
 This document outlines the highly scalable Zero-Trust Identity and Access Management (IAM) architecture for **MoneyGuard**, a global bank. To secure highly sensitive financial data, this design strictly separates **Authentication (AuthN)**, **Authorization (AuthZ) management**, and **Policy Enforcement**. This ensures that every single request is explicitly verified before it reaches our core banking systems.
 
-### Architecture Diagram (Left-to-Right Flow)
+### Architecture Diagram (Fully Detailed Flow)
 
 ```mermaid
 flowchart LR
-    %% Define Nodes
-    US["👤 Users / Services<br>(Client App / Browser)"]
-    IDP["Identity Provider (IdP)<br>idp.moneyguard.com"]
-    IAM["IAM Control Plane<br>auth.moneyguard.com"]
-    ENF["Enforcement Layer<br>api.moneyguard.com (PEP+PDP)"]
-    RES["🏦 Protected Resources<br>Core Banking Microservices"]
+    %% Define User Node
+    US["👤 Users / 🤖 Services<br>(Mobile App, Teller Portal)"]
 
-    %% Define Flow
+    %% Define Subgraphs with Details
+    subgraph IDP_Layer ["Identity Provider (IdP)"]
+        direction TB
+        IDP["idp.moneyguard.com<br>(Backed by Okta/AzureAD)"]
+        IDP_Features["• OIDC / OAuth2 / SAML<br>• MFA (Biometrics/Push)<br>• Corporate Federation"]
+        IDP -.- IDP_Features
+    end
+
+    subgraph IAM_Layer ["IAM Control Plane"]
+        direction TB
+        IAM["iam.moneyguard.com<br>auth.moneyguard.com"]
+        IAM_Features["• Identity Store (Active Directory)<br>• RBAC/ABAC Engine<br>• Token Service (OAuth2)<br>• SCIM (HR Sync)"]
+        IAM -.- IAM_Features
+    end
+
+    subgraph ENF_Layer ["Enforcement Layer"]
+        direction TB
+        ENF["api.moneyguard.com<br>API Gateway (PEP)"]
+        PDP["Policy Decision Point (PDP)<br>(Open Policy Agent)"]
+        ENF <-->|Validate Rules| PDP
+    end
+
+    subgraph RES_Layer ["Protected Resources"]
+        direction TB
+        RES["🏦 Core Banking Microservices<br>(Wire Transfers, Account Info)"]
+    end
+
+    %% Define the Step-by-Step Flow
     US -->|1. Auth Request| IDP
     IDP -->|2. Redirects Client with Auth Code| US
     US -->|3. Exchange Code for Token| IAM
@@ -75,8 +98,6 @@ The ultimate destination. These are internal APIs (e.g., `/v1/wire-transfers`). 
 
 A common point of confusion is exactly **who redirects to whom**. In a standard, secure OAuth2/OIDC flow (Authorization Code Flow), the IdP does *not* talk directly to the IAM Control Plane. The **Client App (User's Browser)** acts as the middleman.
 
-Here is the exact step-by-step technical flow:
-
 **Step A: The Initial Request (Client -> IdP)**
 Alice opens `teller.moneyguard.com`. The app sees she isn't logged in and redirects her browser to the IdP.
 
@@ -132,11 +153,37 @@ The IAM Control Plane verifies the code, checks Alice's RBAC/ABAC rules in the I
 
 
 
-The Client App now attaches this `access_token` to all subsequent API calls to the Enforcement Layer.
+The Client App now uses this `access_token` to authenticate API calls to the Enforcement Layer.
 
 ---
 
-## 3. Policy Enforcement: Open Policy Agent (Rego)
+## 3. Secure Frontend Token Storage (Preventing XSS)
+
+Once the Single Page Application (like a React or Angular app at `teller.moneyguard.com`) receives the `access_token` in Step D, it must be stored securely.
+
+### The Vulnerability: `localStorage`
+
+Many tutorials show storing the JWT in `localStorage` or `sessionStorage`. **For a bank like MoneyGuard, this is strictly prohibited.** If the frontend application has a Cross-Site Scripting (XSS) vulnerability (e.g., a malicious script injected via a vulnerable NPM package or user input), that JavaScript can easily run `localStorage.getItem('access_token')` and steal the token, leading to a complete account takeover.
+
+### The Solution: Backend-For-Frontend (BFF) & HttpOnly Cookies
+
+MoneyGuard utilizes the **BFF Pattern**:
+
+1. The frontend React app does not handle the OAuth flow directly. Instead, it communicates with a lightweight backend proxy (the BFF).
+2. The BFF handles Step C (Token Exchange) with the IAM Control Plane.
+3. When the BFF receives the JWT, it does *not* send the raw token to the React app. Instead, it wraps the token in a tightly locked-down HTTP Cookie.
+
+The HTTP Cookie must have the following flags set by the server:
+
+* `HttpOnly`: This is the most critical flag. It tells the browser, *"Do not let JavaScript read this cookie under any circumstances."* Even if an XSS attack occurs, the malicious script cannot access the token.
+* `Secure`: Ensures the cookie is only sent over HTTPS.
+* `SameSite=Strict`: Prevents the browser from sending the cookie in cross-site requests, mitigating Cross-Site Request Forgery (CSRF) attacks.
+
+When the React app wants to call `api.moneyguard.com/v1/wires`, it makes the request, and the browser *automatically* attaches the secure cookie containing the JWT.
+
+---
+
+## 4. Policy Enforcement: Open Policy Agent (Rego)
 
 When the API Gateway (PEP) intercepts a request to `api.moneyguard.com/v1/wires`, it sends the parsed JWT to the Open Policy Agent (PDP). Here is how MoneyGuard writes an ABAC policy in **Rego** to evaluate Alice's wire transfer request:
 
@@ -175,7 +222,7 @@ is_corporate_ip(ip) if {
 
 ---
 
-## 4. .NET Implementation Example (Enforcement Layer)
+## 5. .NET Implementation Example (Enforcement Layer)
 
 To make this concrete, here is how MoneyGuard's Enforcement Layer (built on **ASP.NET Core**) intercepts the incoming API request, extracts the JWT, and calls the Open Policy Agent (PDP) before allowing the request to hit the core banking controllers.
 
@@ -257,18 +304,18 @@ public class OpaResponse
 
 ---
 
-## 5. End-to-End Example Flow Summary
+## 6. End-to-End Example Flow Summary
 
 1. **Initiation:** Alice opens `wealth.moneyguard.com`.
 2. **Authentication (IdP):** She is redirected to `idp.moneyguard.com`, logs in, and passes MFA. The IdP redirects her browser back to the app with an Auth Code.
 3. **Authorization (IAM):** The web app backend sends the Auth Code to `auth.moneyguard.com`. The IAM Control Plane verifies her, assigns the `wealth_manager` role, and returns a JWT.
-4. **The API Call:** Alice clicks "Send Wire". Her browser sends a POST request to `api.moneyguard.com/v1/wires` with her JWT.
+4. **The API Call:** Alice clicks "Send Wire". Her browser sends a POST request to `api.moneyguard.com/v1/wires` with her secure HttpOnly cookie containing the JWT.
 5. **Enforcement (PEP/PDP):** The .NET API Gateway middleware intercepts the request. It asks the OPA PDP to evaluate the Rego policy. The PDP checks the token, the IP, and the amount, and responds: `{"result": true}`.
 6. **Execution:** The Gateway forwards the request to the internal Microservice, which safely processes the transfer.
 
 ---
 
-## 6. Real-World MoneyGuard Use Cases
+## 7. Real-World MoneyGuard Use Cases
 
 * **Corporate Client Federation:** "Acme Corp" uses MoneyGuard for payroll. Using **Federation**, Acme's HR employees log into `corporate.moneyguard.com` using their existing Acme Microsoft login. They do not need separate MoneyGuard passwords.
 * **Zero-Trust Internal Microservices:** The internal `Mobile Deposit Service` needs to check an account balance. It requests a machine-to-machine token from `auth.moneyguard.com`. When it calls the `Core Ledger Service`, a **Sidecar Proxy** (Enforcement Layer) intercepts the call and validates the token via the **PDP** before letting the services talk.
@@ -276,7 +323,7 @@ public class OpaResponse
 
 ---
 
-## 7. Frequently Asked Questions (FAQ)
+## 8. Frequently Asked Questions (FAQ)
 
 **Q: Why separate the IdP from the IAM Control Plane?**
 **A:** Separation of concerns. The IdP specializes in the complex, heavily regulated world of authentication (passwords, biometrics, hardware keys). The Control Plane specializes in your specific business logic for authorization (who gets to do what within your specific bank apps).
