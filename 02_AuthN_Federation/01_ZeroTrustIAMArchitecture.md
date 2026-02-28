@@ -32,7 +32,7 @@ flowchart LR
         direction TB
         ENF["api.moneyguard.com<br>API Gateway (PEP)"]
         PDP["Policy Decision Point (PDP)<br>(Open Policy Agent)"]
-        ENF <-->|Validate Rules| PDP
+        ENF <-->|"5b. PEP verifies JWKS signature.<br>PDP evaluates ABAC rules."| PDP
     end
 
     subgraph RES_Layer ["Protected Resources"]
@@ -42,12 +42,18 @@ flowchart LR
 
     %% Define the Step-by-Step Flow with URLs and Redirections
     US -->|"1. User accesses teller.moneyguard.com<br>App redirects browser to<br>idp.moneyguard.com/authorize"| IDP
+    
     IDP -->|"2. User logs in & passes MFA.<br>IdP redirects browser back to<br>teller.moneyguard.com/callback?code=xyz"| US
-    US -->|"3. App Backend silently calls<br>POST auth.moneyguard.com/oauth2/token<br>(Exchange code for token)"| IAM
-    IAM -->|"4. Returns JWT Access Token<br>to the Client App"| US
+    
+    US -->|"3. App Backend silently calls<br>POST auth.moneyguard.com/oauth2/token<br>using code, client_id & client_secret"| IAM
+    
+    IAM -.->|"3b. Backend Federation Check:<br>IAM verifies 'code=xyz' directly with IdP"| IDP
+    
+    IAM -->|"4. IAM generates & returns<br>signed JWT Access Token to Client App"| US
+    
     US -->|"5. App makes API Call to<br>POST api.moneyguard.com/v1/wires<br>with JWT (Bearer Token / Cookie)"| ENF
+    
     ENF -->|"6. If PDP ALLOWS,<br>Gateway forwards authorized request"| RES
-
 ```
 
 ## 1. Architecture Modules in Detail
