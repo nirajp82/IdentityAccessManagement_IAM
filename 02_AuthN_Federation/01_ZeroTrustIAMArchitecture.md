@@ -13,11 +13,10 @@ Here is the complete, uncut, and expanded master document.
 This document outlines the highly scalable Zero-Trust Identity and Access Management (IAM) architecture for **MoneyGuard**, a global bank. To secure highly sensitive financial data, this design strictly separates **Authentication (AuthN)**, **Authorization (AuthZ) management**, and **Policy Enforcement**. This ensures that every single request is explicitly verified before it reaches our core banking systems.
 
 ### Architecture Diagram (Fully Detailed Flow)
-
 ```mermaid
 flowchart LR
-    %% Define User Node
-    US["👤 Users / 🤖 Services<br>(Mobile App, Teller Portal)"]
+    %% Define User/Client Node
+    US["👤 User Browser & Client App<br>(e.g., teller.moneyguard.com)"]
 
     %% Define Subgraphs with Details
     subgraph IDP_Layer ["Identity Provider (IdP)"]
@@ -29,7 +28,7 @@ flowchart LR
 
     subgraph IAM_Layer ["IAM Control Plane"]
         direction TB
-        IAM["iam.moneyguard.com<br>auth.moneyguard.com"]
+        IAM["auth.moneyguard.com<br>iam.moneyguard.com"]
         IAM_Features["• Identity Store (Active Directory)<br>• RBAC/ABAC Engine<br>• Token Service (OAuth2)<br>• SCIM (HR Sync)"]
         IAM -.- IAM_Features
     end
@@ -43,20 +42,18 @@ flowchart LR
 
     subgraph RES_Layer ["Protected Resources"]
         direction TB
-        RES["🏦 Core Banking Microservices<br>(Wire Transfers, Account Info)"]
+        RES["🏦 Core Banking Microservices<br>(e.g., /v1/wire-transfers)"]
     end
 
-    %% Define the Step-by-Step Flow
-    US -->|1. Auth Request| IDP
-    IDP -->|2. Redirects Client with Auth Code| US
-    US -->|3. Exchange Code for Token| IAM
-    IAM -->|4. Issue JWT Access Token| US
-    US -->|5. API Call + Bearer Token| ENF
-    ENF -->|6. Authorized Request| RES
+    %% Define the Step-by-Step Flow with URLs and Redirections
+    US -->|"1. User accesses teller.moneyguard.com<br>App redirects browser to<br>idp.moneyguard.com/authorize"| IDP
+    IDP -->|"2. User logs in & passes MFA.<br>IdP redirects browser back to<br>teller.moneyguard.com/callback?code=xyz"| US
+    US -->|"3. App Backend silently calls<br>POST auth.moneyguard.com/oauth2/token<br>(Exchange code for token)"| IAM
+    IAM -->|"4. Returns JWT Access Token<br>to the Client App"| US
+    US -->|"5. App makes API Call to<br>POST api.moneyguard.com/v1/wires<br>with JWT (Bearer Token / Cookie)"| ENF
+    ENF -->|"6. If PDP ALLOWS,<br>Gateway forwards authorized request"| RES
 
 ```
-
----
 
 ## 1. Architecture Modules in Detail
 
