@@ -418,8 +418,54 @@ To further clarify how this architecture applies to the real world, here are thr
 **Q: Why separate the IdP from the IAM Control Plane?**
 **A:** Separation of concerns. The IdP specializes in the complex, heavily regulated world of authentication (passwords, biometrics, hardware keys). The Control Plane specializes in your specific business logic for authorization (who gets to do what within your specific bank apps).
 
-**Q: What is the difference between an API Gateway and a PDP?**
-**A:** Think of the API Gateway as the security guard at a building, and the PDP as the master guest list. The security guard (Gateway) stops you and asks for your ID. The guard then checks with the guest list (PDP) to see if you are actually allowed into the specific room you requested.
+
+**Q: What is the difference between an API Gateway (PEP) and a PDP?**
+
+**A:** A simple way to understand this is to think of the API Gateway as the security guard at the entrance of a building, and the PDP as the master guest list. The security guard (API Gateway) stops you at the door and checks your ID. However, instead of deciding on their own, the guard consults the guest list (PDP) to determine whether you are actually allowed to enter the specific room you’re requesting access to. The guard enforces the decision, but the guest list decides the rules.
+
+```mermaid
+sequenceDiagram
+    participant U as User / Client App
+    participant G as API Gateway (PEP)
+    participant D as Policy Decision Point (PDP)
+    participant S as Backend Service
+
+    U->>G: HTTP Request + JWT Token
+    note right of G: PEP intercepts request\nExtracts token & context
+
+    G->>D: Authorization Request\n(subject, action, resource, context)
+    note right of D: PDP evaluates RBAC/ABAC policies\n(token, roles, attributes)
+
+    alt Access Allowed
+        D-->>G: ALLOW
+        note right of G: PEP enforces decision
+        G->>S: Forward request
+        S-->>G: Response
+        G-->>U: 200 OK + Data
+    else Access Denied
+        D-->>G: DENY
+        G-->>U: 403 Forbidden
+    end
+```
+
+In enterprise security architectures, these two components work together as a pair and are formally defined by the XACML (eXtensible Access Control Markup Language) security model. The Policy Enforcement Point (PEP) is typically implemented as an API Gateway or sidecar proxy. It acts as the “muscle” of the system. Its sole responsibility is to intercept incoming traffic, pause the request, ask for an authorization decision, and then strictly enforce whatever decision it receives. The PEP does not understand business rules or authorization logic.
+
+The Policy Decision Point (PDP), on the other hand, is the “brain” of the system. It is usually implemented as a rule engine, such as Open Policy Agent (OPA). The PDP evaluates complex authorization rules against the user’s identity, roles, attributes, and request context. It returns a simple decision—ALLOW or DENY—but does not handle network traffic, user interaction, or request routing.
+
+From an architectural placement perspective, the API Gateway acting as the PEP sits at the very edge of the internal network, for example at `api.moneyguard.com`. It faces the public internet and intercepts every incoming request from web or mobile clients. The PDP sits deeper inside the secure internal network, often deployed very close to the gateway, sometimes even as a sidecar container in the same cluster. This close proximity ensures that authorization checks can be performed with extremely low latency, often under one millisecond, over the local network.
+
+To understand how these components interact in practice, consider a concrete example from a fictional financial platform called MoneyGuard. In this scenario, Alice is a Wealth Manager attempting to view a highly sensitive VIP client portfolio. She clicks a button in her application, which sends a `GET` request to `api.moneyguard.com/v1/vip-portfolios/777`. Her request includes a JWT access token.
+
+When the request arrives, the API Gateway immediately intercepts it. Acting as the enforcement point, the gateway extracts Alice’s JWT token and pauses the request. At this stage, the gateway does not inspect authorization rules or attempt to determine whether Alice is allowed to view VIP portfolios. It simply recognizes that it must request a decision from the PDP.
+
+The gateway then sends a fast, internal authorization request to the PDP containing all relevant context. This includes Alice’s JWT token, the HTTP method (`GET`), the requested resource (`/v1/vip-portfolios/777`), and contextual attributes such as her IP address (`192.168.1.50`). Conceptually, the gateway is asking, “Is this user allowed to perform this action on this resource under these conditions?”
+
+The PDP receives this information and evaluates it against the authorization policies defined by the security team. These policies may include multiple checks. For example, the PDP verifies that Alice’s token includes the `WealthManager` role, confirms that the token is still valid, checks that the request originates from a trusted corporate IP address, and ensures that the access attempt occurs during approved business hours, such as between 9 AM and 5 PM on a weekday. After evaluating all rules, the PDP returns a simple JSON response indicating whether access is allowed.
+
+If the PDP responds with `{"allow": true}`, the API Gateway enforces the decision by forwarding the request to the VIP Portfolio microservice, which retrieves the data and returns it to Alice. If, however, the PDP responds with `{"allow": false}`—for example, if Alice attempted access at 11:00 PM on a Saturday—the gateway immediately terminates the request and returns an HTTP 403 Forbidden response. In this case, the backend microservice is never contacted and remains fully protected.
+
+Separating the PEP and PDP provides significant architectural benefits. Embedding all authorization rules directly into the API Gateway would quickly become unmanageable, especially in systems with hundreds of microservices and complex, attribute-based policies. API Gateways are optimized for high-throughput request routing and traffic management, not for evaluating complex authorization logic. By isolating policy evaluation in the PDP and enforcement in the PEP, the system remains fast, scalable, and easier to maintain. Security teams can update policies centrally without redeploying gateways, while the gateway continues to focus exclusively on enforcing decisions at high performance.
+
 
 **Q: Why doesn't the Wire Transfer Microservice handle its own security?**
 **A:** If we have 500 microservices at MoneyGuard, we don't want 500 different engineering teams writing their own security logic. By centralizing it at the Enforcement Layer (`api.moneyguard.com` and sidecar proxies), we ensure bank-grade security is uniformly applied, audited, and updated in one place.
