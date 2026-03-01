@@ -177,7 +177,25 @@ Here is what happens during that setup:
 4. **The Secret Password (`client_secret`):** Because BudgetApp has a secure backend server, MoneyGuard also gives them a highly confidential password. BudgetApp stores this in their digital vault and will use it later to prove they are the real BudgetApp during the Server-to-Server token exchange.
 
 Once Phase 0 is complete, BudgetApp is officially recognized by MoneyGuard, and the real-world flows can begin.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as BudgetApp (Client Developers)
+    participant IAM as MoneyGuard (Developer Portal / Auth Server)
 
+    Note over App, IAM: Phase 0: One-time setup before any user logs in
+    
+    App->>IAM: 1. The Introduction (Register App Name)
+    App->>IAM: 2. Set Strict Return Address (redirect_uri: https://budgetapp.com/callback)
+    
+    Note over IAM: MoneyGuard saves the allowed<br/>URL to prevent routing attacks
+    
+    IAM-->>App: 3. Issue ID Badge (client_id: budgetapp_client_99)
+    IAM-->>App: 4. Issue Secret Password (client_secret)
+    
+    Note over App: BudgetApp stores the client_id<br/>and client_secret securely in its vault.
+
+```
 ### Scenario A: The External Application (BudgetApp)
 
 **The Setup:** Alice (the Resource Owner) wants to use BudgetApp (the Client) to track her spending. BudgetApp needs permission to pull data from MoneyGuard's APIs (the Resource Server).
