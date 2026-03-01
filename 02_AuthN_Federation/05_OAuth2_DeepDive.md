@@ -121,9 +121,9 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
       * If a hacker tried to fake the signature, the Public Key in Step B will fail to decrypt it, spitting out garbage math. The comparison fails.
       * If **Hash A == Hash B**, the API Gateway knows the token is perfectly intact and genuinely issued by the Auth Server. It lets the request through to the backend microservice immediately.
 
-      ## **The Golden Rule: Signatures vs. Encryption**
+      #### **The Golden Rule: Signatures vs. Encryption**
       
-      ### ** Data Encryption (Keeping a Secret)**
+      ##### ** Data Encryption (Keeping a Secret)**
       
       * **Goal:** Send a hidden message only the recipient can read.
       * **How it works:**
@@ -134,7 +134,7 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
       
       **Analogy:** You put a letter in a locked box and give the key only to the recipient.
       
-      ### ** Digital Signatures (Proving Who You Are)**
+      ##### ** Digital Signatures (Proving Who You Are)**
       
       * **Goal:** Prove you wrote the message and that it hasn’t been changed.
       * **How it works:**
@@ -145,7 +145,6 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
       * **Result:** If it matches, it proves the holder of the private key created the message, and the message is intact.
       
       **Analogy:** You sign a document with your personal seal. Anyone can check the seal to confirm it’s truly from you and hasn’t been tampered with.
-      
       
       ✅ **Quick Memory Trick:**
       
