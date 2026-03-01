@@ -177,6 +177,7 @@ Here is what happens during that setup:
 4. **The Secret Password (`client_secret`):** Because BudgetApp has a secure backend server, MoneyGuard also gives them a highly confidential password. BudgetApp stores this in their digital vault and will use it later to prove they are the real BudgetApp during the Server-to-Server token exchange.
 
 Once Phase 0 is complete, BudgetApp is officially recognized by MoneyGuard, and the real-world flows can begin.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -196,7 +197,6 @@ sequenceDiagram
     Note over App: BudgetApp stores the client_id<br/>and client_secret securely in its vault.
 
 ```
-Here is the fully updated **Scenario A**, integrating the detailed, line-by-line breakdown of the token exchange and payload deliveries. I have also adjusted the headers so they match the exact numbering in the updated Mermaid diagram perfectly.
 
 ---
 
@@ -328,6 +328,7 @@ Host: api.moneyguard.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 
 ```
+
 ---
 
 ### Scenario B: The Internal Application (Teller Portal)
@@ -345,6 +346,42 @@ The Teller Portal is likely a Single Page Application (like React). To keep the 
 
 By using the exact same OAuth 2.0 PKCE flow for both BudgetApp and the Teller Portal, MoneyGuard ensures that every single request hitting its API Gateway has a mathematically verifiable "Valet Key," regardless of whether the request came from an external startup or an internal employee laptop.
 
+---
+
+### Deep Dive FAQs: PKCE & Interception
+
+**Q: Why are frontend apps like React or Mobile uniquely vulnerable, and what is the "Interception Attack"?**
+**A:** If you are a frontend or full-stack developer building React apps (or mobile apps), you face a unique danger because your app is considered a **"Public Client."** Normally, when a backend server talks to MoneyGuard, it proves its identity using a permanent password called a `client_secret`. But what if you are building a React Single Page Application (SPA)?
+
+* **You cannot put a `client_secret` inside a React app.** React code runs directly inside the user's web browser. Anyone can open Chrome DevTools, look at the source code, and read the password.
+* Because they cannot hold a permanent password securely, React apps (and mobile apps) cannot easily prove exactly who they are to the Auth Server.
+
+**The Interception Attack (The Stolen Ticket):**
+Because the React app doesn't have a permanent `client_secret` to prove who it is, we have a massive security hole right in the browser URL bar:
+
+1. Alice clicks "Login" and is redirected to MoneyGuard.
+2. MoneyGuard successfully authenticates her and sends the temporary Authorization Code back to the React app by putting it right in the URL: `https://budgetapp.com/callback?code=123`.
+3. Alice happens to have a **malicious browser extension** installed (like a fake "Coupon Finder" or "Ad Blocker"). This extension has permission to read the URLs of the tabs she has open. It intercepts the URL and steals the Auth Code.
+*(Hint: This is the exact same vulnerability mobile apps have. Instead of a malicious Chrome extension reading the URL, a malicious "Free Flashlight" app intercepts the phone's custom URI redirect.)*
+4. The malicious extension silently runs to MoneyGuard's backend and says, *"Here is Alice's code! Give me the Access Token!"*
+5. Because the legitimate React app doesn't have a `client_secret`, MoneyGuard has no way to tell the difference between the real React app and the malicious extension. MoneyGuard hands the Access Token to the hacker.
+
+**Q: How does PKCE (Proof Key for Code Exchange) actually solve this interception problem?**
+**A:** Since the React app cannot safely hold a *permanent* password, PKCE was invented to let the app create a **temporary, one-time password** for every single login session.
+
+> **The Plain English Analogy: The Coat Check PIN**
+> Imagine dropping your coat off at a coat check (starting the login). The attendant gives you a numbered ticket (the Auth Code).
+> What happens if a pickpocket steals your ticket? They can just walk up and take your coat!
+> **PKCE is like adding a PIN.** When you drop your coat off, the attendant says, *"I'm giving you this ticket, but I also need you to tell me a secret 4-digit PIN."* > Now, if the pickpocket steals your ticket and goes to the counter, the attendant says: *"I see you have the ticket. Now, what's the PIN?"* The pickpocket doesn't know it, and your coat is safe.
+
+**How PKCE actually does this in the React code (The Math Trap):**
+
+1. **Creating the PIN (Step 1):** When the React app starts the login, it invents a random, temporary password (`code_verifier`). It mathematically scrambles it into a hint (`code_challenge`) using a **one-way SHA-256 hash**. It sends the hint to MoneyGuard and says, *"Hold onto this hint. I'll be back."*
+2. **The Theft (Step 4):** The Auth Server sends the Auth Code back via the URL. The malicious browser extension reads the URL and steals the code.
+3. **The Block (Step 5):** The hacker extension takes the stolen code to MoneyGuard and asks for the token. MoneyGuard says: *"I see the code. But to get the token, you must give me the exact raw password that matches the hint you left me earlier."*
+4. **The Result:** The hacker extension is trapped. They could steal the Auth Code from the public URL, but they do not have the raw password because it was generated and kept securely inside the React app's local Javascript memory. The hacker is blocked, and Alice's bank account is safe.
+
+**Summary:** PKCE exists because front-end applications (React, Angular, iOS, Android) cannot safely store a permanent `client_secret`. It solves the "Authorization Code Interception Attack" by forcing the app to dynamically prove it is the exact same app that started the login process.
 
 ---
 
