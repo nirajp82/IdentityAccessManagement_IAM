@@ -121,18 +121,36 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
       * If a hacker tried to fake the signature, the Public Key in Step B will fail to decrypt it, spitting out garbage math. The comparison fails.
       * If **Hash A == Hash B**, the API Gateway knows the token is perfectly intact and genuinely issued by the Auth Server. It lets the request through to the backend microservice immediately.
 
-    * **The Golden Rule to Remember: Signatures vs. Encryption**
-
-      * **Data Encryption (Keeping a Secret):**
-
-        * **The Goal:** Send a hidden message.
-        * **The Flow:** You **Encrypt** it using the **Public Key**.
-        * **The Result:** The only way to **Decrypt** it is by using the **Private Key** (which only the receiver has).
-      * **Digital Signatures (Proving Who You Are — JWT):**
-
-        * **The Goal:** Prove you wrote the message and no one altered it.
-        * **The Flow:** You "Sign" (Encrypt) the data using your **Private Key**.
-        * **The Result:** Anyone can **Decrypt** it using your **Public Key**. If the public key successfully decrypts it, it proves with certainty that the holder of the private key created it.
+      ## **The Golden Rule: Signatures vs. Encryption**
+      
+      ### ** Data Encryption (Keeping a Secret)**
+      
+      * **Goal:** Send a hidden message only the recipient can read.
+      * **How it works:**
+      
+        1. You encrypt the message using the **recipient’s public key**.
+        2. Only the recipient’s **private key** can decrypt it.
+      * **Result:** The message stays secret — even if someone intercepts it, they can’t read it.
+      
+      **Analogy:** You put a letter in a locked box and give the key only to the recipient.
+      
+      ### ** Digital Signatures (Proving Who You Are)**
+      
+      * **Goal:** Prove you wrote the message and that it hasn’t been changed.
+      * **How it works:**
+      
+        1. You create a **hash** (a fingerprint) of the message.
+        2. You “sign” the hash with your **private key**.
+        3. Anyone can use your **public key** to verify that the signature matches the message.
+      * **Result:** If it matches, it proves the holder of the private key created the message, and the message is intact.
+      
+      **Analogy:** You sign a document with your personal seal. Anyone can check the seal to confirm it’s truly from you and hasn’t been tampered with.
+      
+      
+      ✅ **Quick Memory Trick:**
+      
+      * **Encryption:** “Lock it → Only recipient can unlock.”
+      * **Signature:** “Sign it → Everyone can verify.”
 
 ### PKCE, Introspection, and Revocation
 
