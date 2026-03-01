@@ -55,17 +55,6 @@ To build a scalable IAM system, you must strictly define the boundaries of the p
 
 ### Tokens
 
-Here is a much clearer, highly structured rewrite of the **Access Token** concept. It emphasizes the "Valet Key" analogy while explicitly calling out the architectural dangers of confusing authorization with authentication.
-
-You can replace the original Access Token bullet point in your document with this expanded, Staff-level explanation:
-
----
-
-Here is the **clean, consistent, drop-in replacement formatting**, aligned with the **Resource Owner section style**.
-You can **replace your entire token section as-is**.
-
----
-
 * **Access Token:**
   The “Valet Key.” A credential used by the Client application to securely access the Resource Server (API).
 
