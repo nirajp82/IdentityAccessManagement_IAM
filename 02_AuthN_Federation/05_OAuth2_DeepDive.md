@@ -97,7 +97,42 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
 
 * **Header:** Defines the algorithm (e.g., `RS256`) and Key ID (`kid`).
 * **Payload:** Contains the claims (scopes, expiration, issuer).
-* **Signature:** Cryptographic math proving the token was created by the Authorization Server and hasn't been tampered with. *Problem solved: Allows APIs to validate tokens locally without querying the IAM database.*
+* **Signature:** Cryptographic math proving the token was created by the Authorization Server and hasn't been tampered with.
+  * Problem solved: Allows APIs to validate tokens locally without querying the IAM database.*
+  * **How the JWT signature used (Step-by-Step):**
+    Here is exactly how an API Gateway validates an incoming token without ever making a network call to the database.
+
+    * **Phase 1: The Auth Server "Signs" the Token**
+
+      * When Alice logs in, the Authorization Server (IAM) creates the JWT Header and Payload (e.g., `{"name": "Alice", "scopes": "wires:write"}`).
+      * **The Hash:** The Auth Server runs that plaintext Header and Payload through a SHA-256 algorithm. This creates a unique, irreversible string of characters (let's call it **HashX**).
+      * **The Signature:** The Auth Server takes **HashX** and encrypts it using its tightly guarded **Private Key**. This encrypted hash is attached to the end of the token. This is the **Signature**.
+
+    * **Phase 2: The API Gateway "Verifies" the Token**
+
+      * The Client App sends this JWT to the API Gateway (`api.moneyguard.com`). The Gateway has never seen this token before, but it downloaded the Auth Server's **Public Key** this morning.
+      * **Step A (The Gateway's Hash):** The Gateway looks at the plaintext Header and Payload on the token and runs them through the SHA-256 algorithm itself. It holds this new hash in memory. Let's call it **Hash A**.
+      * **Step B (The Public Key Decryption):** The Gateway takes the encrypted **Signature** off the back of the token and applies the Auth Server's **Public Key** to it **(Decrypt it)**. Because it was encrypted with the Private Key, the Public Key successfully decrypts it, revealing the original hash that the Auth Server calculated. Let's call this decrypted hash **Hash B**.
+      * **Step C (The Final Check):** The Gateway asks: **Does Hash A exactly equal Hash B?**
+
+    * **The Result**
+
+      * If a hacker tampered with the token (e.g., changed `wires:read` to `wires:write`), the Gateway's **Hash A** will be completely different. The comparison fails.
+      * If a hacker tried to fake the signature, the Public Key in Step B will fail to decrypt it, spitting out garbage math. The comparison fails.
+      * If **Hash A == Hash B**, the API Gateway knows the token is perfectly intact and genuinely issued by the Auth Server. It lets the request through to the backend microservice immediately.
+
+    * **The Golden Rule to Remember: Signatures vs. Encryption**
+
+      * **Data Encryption (Keeping a Secret):**
+
+        * **The Goal:** Send a hidden message.
+        * **The Flow:** You **Encrypt** it using the **Public Key**.
+        * **The Result:** The only way to **Decrypt** it is by using the **Private Key** (which only the receiver has).
+      * **Digital Signatures (Proving Who You Are — JWT):**
+
+        * **The Goal:** Prove you wrote the message and no one altered it.
+        * **The Flow:** You "Sign" (Encrypt) the data using your **Private Key**.
+        * **The Result:** Anyone can **Decrypt** it using your **Public Key**. If the public key successfully decrypts it, it proves with certainty that the holder of the private key created it.
 
 ### PKCE, Introspection, and Revocation
 
