@@ -159,54 +159,97 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
 
 ---
 
-## 3. Request/Response Examples
+## 3. Deep Dive: Redirection and Payload Flows
 
-Here are realistic HTTP traces for MoneyGuard's OAuth 2.0 implementation.
+To understand OAuth 2.0, you must track exactly how the browser redirects the user and how the backend servers whisper to each other securely.
 
-### Flow: Authorization Code with PKCE
+We will look at two distinct flows: an external third-party app, and an internal first-party app. Both use the **Authorization Code Flow with PKCE**, but the user experience and trust levels differ.
 
-**Step 1: Authorization Request (Browser to Auth Server)**
-The client generates a random `code_verifier`, hashes it to create the `code_challenge`, and redirects the user.
+### Scenario A: The External Application (BudgetApp)
+
+**The Setup:** Alice (the Resource Owner) wants to use BudgetApp (the Client) to track her spending. BudgetApp needs permission to pull data from MoneyGuard's APIs (the Resource Server).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Alice as Alice (Browser)
+    participant BudgetApp as BudgetApp Backend
+    participant Auth as auth.moneyguard.com (IAM)
+    participant API as api.moneyguard.com (Resource)
+
+    Alice->>BudgetApp: 1. Clicks "Connect Bank"
+    BudgetApp->>BudgetApp: Generates PKCE Secret & Hash
+    BudgetApp->>Alice: Redirects browser to MoneyGuard
+    Alice->>Auth: 2. GET /authorize (Sends PKCE Hash)
+    Auth-->>Alice: Prompts Login & Consent Screen
+    Alice->>Auth: 3. Authenticates & Clicks "Allow"
+    Auth->>Alice: Redirects browser back to BudgetApp
+    Alice->>BudgetApp: 4. GET /callback?code=123 (Delivers Code)
+    BudgetApp->>Auth: 5. POST /token (Sends Code + PKCE Secret)
+    Auth->>Auth: Verifies PKCE Secret matches Hash
+    Auth-->>BudgetApp: 6. Returns Access Token (Valet Key)
+    BudgetApp->>API: 7. GET /transactions + Bearer Token
+    API->>API: Verifies JWT Signature Locally
+    API-->>BudgetApp: 8. Returns Bank Data
+
+```
+
+#### Step 1 & 2: The Authorization Request (Browser to Auth Server)
+
+Alice clicks "Connect Bank" in BudgetApp. BudgetApp generates the PKCE secret password in its backend, creates the "hint" (`code_challenge`), and redirects Alice's browser to the MoneyGuard Auth Server.
+
+* **What it solves:** This tells the bank *who* is asking for access and *what* they want, while securely dropping off the PKCE locked box.
 
 ```http
 GET /authorize?
   response_type=code
-  &client_id=teller_portal_app
-  &redirect_uri=https://teller.moneyguard.com/callback
-  &scope=transactions:read wires:write
-  &state=892jflk3298
+  &client_id=budgetapp_client_99
+  &redirect_uri=https://budgetapp.com/callback
+  &scope=transactions:read
+  &state=random_state_88291
   &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGZxkVj...
   &code_challenge_method=S256 HTTP/1.1
 Host: auth.moneyguard.com
 
 ```
 
-**Step 2: Authorization Response (Auth Server to Browser)**
-After user login and consent, the server redirects back with a single-use code.
+#### Step 3: Authentication and Consent (The Human Element)
+
+MoneyGuard's Auth Server pauses the technical flow. It looks at the browser and shows Alice a login screen.
+After she enters her password and MFA, the Auth Server shows a **Consent Screen**: *"BudgetApp wants to read your transactions. Do you allow this?"* Alice clicks **Allow**.
+
+#### Step 4: The Callback (Auth Server to Browser to Client)
+
+The Auth Server generates a temporary, single-use "Authorization Code" (valid for 60 seconds). It redirects Alice's browser back to BudgetApp, attaching the code to the URL.
 
 ```http
 HTTP/1.1 302 Found
-Location: https://teller.moneyguard.com/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=892jflk3298
+Location: https://budgetapp.com/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=random_state_88291
 
 ```
 
-**Step 3: Token Request (Client Backend to Auth Server)**
-The client sends the `code` and the unhashed `code_verifier`.
+#### Step 5: The Token Exchange (Server to Server)
+
+BudgetApp's backend extracts the code from the URL. It immediately opens a secure, hidden backend connection to MoneyGuard's Auth Server to trade the code for the Access Token.
+
+* **What it solves:** This is where the **PKCE check** happens. BudgetApp sends the raw `code_verifier` (the secret password). The Auth Server hashes it and ensures it matches the `code_challenge` from Step 1. If a malicious app stole the code in Step 4, they would fail here because they don't know the secret password.
 
 ```http
 POST /token HTTP/1.1
 Host: auth.moneyguard.com
 Content-Type: application/x-www-form-urlencoded
-Authorization: Basic dGVsbGVyX3BvcnRhbF9hcHA6c2VjcmV0X2tleV8xMjM=
+Authorization: Basic YnVkZ2V0YXBwX2NsaWVudF85OTpzZWNyZXRfcGFzc3dvcmQ=
 
 grant_type=authorization_code
 &code=SplxlOBeZQQYbYS6WxSbIA
-&redirect_uri=https://teller.moneyguard.com/callback
-&code_verifier=raw_random_string_from_step_1
+&redirect_uri=https://budgetapp.com/callback
+&code_verifier=the_raw_secret_password_generated_in_step_1
 
 ```
 
-**Step 4: Token Response (Success)**
+#### Step 6: The Delivery of the Valet Key
+
+The Auth Server successfully verifies the math. It issues the JWT Access Token and a Refresh Token back to the BudgetApp server.
 
 ```json
 {
@@ -214,21 +257,39 @@ grant_type=authorization_code
   "token_type": "Bearer",
   "expires_in": 900,
   "refresh_token": "8xLOxBtZp8",
-  "scope": "transactions:read wires:write"
+  "scope": "transactions:read"
 }
 
 ```
 
-**Step 4b: Token Response (Error Example)**
-If the code is expired or the PKCE verifier doesn't match the challenge.
+#### Step 7: The API Call (Client to Resource Server)
 
-```json
-{
-  "error": "invalid_grant",
-  "error_description": "The authorization code is invalid or expired."
-}
+BudgetApp now has the Valet Key. In the background, it calls the MoneyGuard API to fetch Alice's data. It attaches the Access Token to the `Authorization` header. The API Gateway verifies the JWT digital signature locally (the math check) and returns the financial data.
+
+```http
+GET /v1/transactions HTTP/1.1
+Host: api.moneyguard.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 
 ```
+
+---
+
+### Scenario B: The Internal Application (Teller Portal)
+
+**The Setup:** Bob (the Resource Owner) is a MoneyGuard employee. He arrives at work and opens the internal `Teller Portal` (the Client) on his laptop to process wire transfers on the `Core Ledger API` (the Resource Server).
+
+The flow for the internal Teller Portal is technically **identical** to the BudgetApp flow (it still uses the Auth Code with PKCE). However, because this is an internal Zero-Trust environment, a few business rules change.
+
+#### Key Differences in the Internal Flow:
+
+1. **First-Party Trust (Skipping the Consent Screen):** When Bob is redirected to `auth.moneyguard.com` (Step 2), he still has to log in with his employee credentials and MFA. However, the Auth Server **skips the Consent Screen**. Because the Teller Portal is an official, first-party MoneyGuard application, the IAM system assumes Bob naturally consents to using it.
+2. **Elevated Scopes:** BudgetApp only requested `transactions:read`. The internal Teller Portal will request highly sensitive scopes like `wires:write` and `accounts:admin`.
+3. **The Backend-For-Frontend (BFF) Pattern:**
+The Teller Portal is likely a Single Page Application (like React). To keep the Access Token safe from browser hackers, the React app doesn't hold the token. The token is held by the Teller Portal's backend proxy. The proxy issues Bob's browser a secure, encrypted HTTP Cookie. When Bob clicks "Send Wire", the browser sends the Cookie, the proxy swaps the Cookie for the Access Token, and forwards the request to the API Gateway.
+
+By using the exact same OAuth 2.0 PKCE flow for both BudgetApp and the Teller Portal, MoneyGuard ensures that every single request hitting its API Gateway has a mathematically verifiable "Valet Key," regardless of whether the request came from an external startup or an internal employee laptop.
+
 
 ---
 
