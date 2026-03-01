@@ -234,23 +234,35 @@ A highly available, multi-region OAuth 2.0 architecture separates the IAM Contro
 ### Diagram: System Flow at Scale
 
 ```mermaid
-architecture-beta
-    group edge(cloud)[Edge Layer]
-    group iam(cloud)[IAM Control Plane (Multi-Region)]
-    group backend(cloud)[Resource Servers]
+flowchart TD
+    subgraph Edge [Edge Layer]
+        GW[API Gateway / PEP]
+        Redis[(Redis: Blocklist & JWKS)]
+    end
 
-    service gw(server)[API Gateway] in edge
-    service redis(database)[Redis Blocklist & JWKS] in edge
+    subgraph IAM [IAM Control Plane]
+        AuthZ[Auth Server Nodes]
+        DB[(Distributed DB: Refresh Tokens)]
+    end
+
+    subgraph Backend [Resource Servers]
+        Core[Core Banking APIs]
+    end
+
+    %% Edge internal connections
+    GW <-->|1. Sub-millisecond local check| Redis
+
+    %% Cross-boundary connections
+    GW <-->|2. Fetch public keys periodically| AuthZ
+    AuthZ <-->|3. Read/Write long-lived tokens| DB
     
-    service authz(server)[Auth Server Nodes] in iam
-    service db(database)[Distributed DB (Refresh Tokens)] in iam
+    %% Traffic flow
+    GW ==>|4. Forward authorized traffic| Core
 
-    service core(server)[Core Banking APIs] in backend
-
-    gw:B -- T:redis
-    gw:R -- L:authz
-    authz:B -- T:db
-    gw:B -- T:core
+    %% Styling to make it look like an architecture diagram
+    style Edge fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style IAM fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style Backend fill:#e6ffe6,stroke:#009933,stroke-width:2px
 
 ```
 
