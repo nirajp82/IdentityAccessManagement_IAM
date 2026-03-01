@@ -293,56 +293,111 @@ By using the exact same OAuth 2.0 PKCE flow for both BudgetApp and the Teller Po
 
 ---
 
-## 4. System Architecture and Components
+## 4. System Architecture: Scaling OAuth 2.0 at MoneyGuard
 
-A highly available, multi-region OAuth 2.0 architecture separates the IAM Control Plane from the API Enforcement Layer.
+In Section 3, we looked at the flow of a *single* user getting a token. But MoneyGuard isn't just handling one user; it’s handling 50,000 API requests per second on Black Friday.
 
-### Architecture Components:
+If every single one of those 50,000 requests had to go to the main database to ask, *"Is this token valid?"*, the database would melt down in seconds. This is where **System Architecture** comes in. We have to separate the system into two distinct zones: **The Edge** (fast, dumb, and scalable) and **The Core** (smart, secure, and isolated).
 
-1. **Global Load Balancer / WAF:** Routes traffic to the nearest geographic region and blocks DDoS attacks.
-2. **API Gateway (Resource Server / PEP):** The entry point for all API traffic (`api.moneyguard.com`). It validates JWT signatures locally using cached Public Keys (JWKS).
-3. **Authorization Server (IAM):** The cluster handling `/authorize` and `/token` endpoints. It is compute-heavy (cryptographic signing).
-4. **Token Storage Database:** A highly available, multi-region database (e.g., Cassandra, DynamoDB, CockroachDB). *Crucially, JWT Access Tokens are NOT stored here.* Only **Refresh Tokens** and **Client Configurations** are stored here.
-5. **Distributed Cache (Redis):** Serves two purposes:
-* *JWKS Cache:* Stores the Auth Server's public keys at the edge.
-* *Revocation Blocklist:* Stores the IDs (`jti`) of revoked JWTs. The API Gateway checks this in <1ms.
+To achieve zero downtime and instant security, MoneyGuard divides its architecture into three main layers.
 
-
-
-### Diagram: System Flow at Scale
+### The Architecture Diagram
 
 ```mermaid
 flowchart TD
-    subgraph Edge [Edge Layer]
-        GW[API Gateway / PEP]
-        Redis[(Redis: Blocklist & JWKS)]
+    subgraph EdgeLayer [1. The Edge Layer (The Bouncers)]
+        WAF[Web Application Firewall / Load Balancer]
+        GW[API Gateway / Policy Enforcement Point]
+        Redis[(Redis In-Memory Cache)]
     end
 
-    subgraph IAM [IAM Control Plane]
-        AuthZ[Auth Server Nodes]
-        DB[(Distributed DB: Refresh Tokens)]
+    subgraph IAMLayer [2. IAM Control Plane (The Passport Office)]
+        AuthZ[Authorization Server Cluster]
+        DB[(Distributed Database)]
     end
 
-    subgraph Backend [Resource Servers]
-        Core[Core Banking APIs]
+    subgraph BackendLayer [3. Resource Servers (The Vaults)]
+        Microservices[Core Banking Microservices]
     end
 
-    %% Edge internal connections
-    GW <-->|1. Sub-millisecond local check| Redis
+    %% External Traffic
+    Internet((Internet)) --> WAF
+    WAF --> GW
 
-    %% Cross-boundary connections
-    GW <-->|2. Fetch public keys periodically| AuthZ
-    AuthZ <-->|3. Read/Write long-lived tokens| DB
+    %% Edge internal connections (Microsecond latency)
+    GW <-->|Check Public Keys & Blocklist locally| Redis
+
+    %% Cross-boundary connections (Millisecond latency)
+    GW -.->|Fetch new Public Keys every 24h| AuthZ
+    AuthZ <-->|Read/Write Refresh Tokens| DB
     
-    %% Traffic flow
-    GW ==>|4. Forward authorized traffic| Core
+    %% Safe Traffic flow
+    GW ==>|Forward authorized traffic| Microservices
 
-    %% Styling to make it look like an architecture diagram
-    style Edge fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style IAM fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
-    style Backend fill:#e6ffe6,stroke:#009933,stroke-width:2px
+    %% Styling
+    style EdgeLayer fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style IAMLayer fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style BackendLayer fill:#e6ffe6,stroke:#009933,stroke-width:2px
 
 ```
+
+### Layer 1: The Edge Layer (The Bouncers)
+
+This layer sits at the very edge of MoneyGuard’s network. Its entire job is to block bad traffic and validate Access Tokens as fast as mathematically possible.
+
+* **The Web Application Firewall (WAF):** The first line of defense. It blocks basic DDoS attacks and malicious IP addresses before they even reach the OAuth system.
+* **The API Gateway:** The central checkpoint (often called a Policy Enforcement Point). **Every single API request must pass through here.** The Gateway never talks to the main database. Instead, it relies on its own CPU to do the "Wax Seal Math" (validating the JWT signature).
+* **Redis (The Fast-Access Clipboard):** The Gateway is fast, but it needs a little bit of data to do its job. It uses Redis (an ultra-fast, in-memory cache) to hold two critical things:
+1. **The Public Keys (JWKS):** The Gateway caches the IAM Server's public keys here so it can verify the digital signatures.
+2. **The Revocation Blocklist:** A list of "Wanted" tokens that have been explicitly canceled.
+
+
+
+### Layer 2: The IAM Control Plane (The Passport Office)
+
+This layer is heavily isolated. It does not handle everyday API traffic. It only wakes up when a user needs to log in, or when a 15-minute Access Token expires and the app needs to use a Refresh Token to get a new one.
+
+* **Authorization Server Nodes:** A cluster of heavy-compute servers. They handle password verification, MFA, and the actual cryptography of "minting" (signing) new JWTs.
+* **Distributed Database (Cassandra/DynamoDB):** The deep archive. **Access Tokens are NEVER stored here.** This database only stores the long-lived **Refresh Tokens**. Because it only handles logins and token refreshes (not every single API call), it doesn't get overwhelmed by high traffic.
+
+### Layer 3: The Resource Servers (The Vaults)
+
+This is where the actual MoneyGuard microservices live (e.g., the `Ledger Service`, the `Wire Transfer Service`).
+
+* They are completely firewalled off from the internet.
+* They blindly trust the API Gateway. If a request reaches a microservice, the microservice knows the API Gateway has already validated the token, checked the math, and verified the scopes.
+
+---
+
+### How It All Works Together: Two Real-World Scenarios
+
+To see why this architecture is brilliant, let's look at how it handles massive scale and security emergencies.
+
+#### Scenario 1: Black Friday Traffic Spike (The "Stateless" Scale)
+
+**The Situation:** 50,000 customers all open their MoneyGuard mobile apps at the exact same second to check their balances while shopping.
+**The System Response:**
+
+1. 50,000 API requests hit the **API Gateway** holding JWT Access Tokens.
+2. The Gateway pulls the Public Key from **Redis** (taking 0.001 milliseconds).
+3. The Gateway uses its CPU to verify the cryptographic signature on all 50,000 tokens locally.
+4. The Gateway forwards the safe traffic to the Backend Microservices.
+**The Result:** The IAM Database experiences **zero** spike in traffic. Because the tokens are "stateless" (verified via math, not by checking a database), the system scales infinitely just by adding more CPU power to the API Gateway.
+
+#### Scenario 2: The Stolen Phone (The Redis Blocklist in Action)
+
+**The Situation:** Bob is a MoneyGuard teller. His laptop is stolen while he is logged in. The thief opens the laptop and tries to wire money. The thief has a perfectly valid JWT Access Token that doesn't expire for another 10 minutes!
+**The System Response:**
+
+1. Bob calls IT. The IT Admin clicks "Revoke Session" in the IAM portal.
+2. The **IAM Control Plane** immediately deletes Bob's Refresh Token from the Database (so the thief can't get any *new* access tokens).
+3. The IAM Control Plane takes the unique ID (`jti`) of Bob's currently active Access Token and instantly pushes it to the **Redis Blocklist** at the Edge.
+4. The thief clicks "Send Wire". The request hits the **API Gateway**.
+5. Before doing the math, the Gateway checks the Redis Blocklist. It sees Bob's token ID on the "Wanted" list.
+6. The Gateway immediately rejects the request with a `401 Unauthorized` error.
+**The Result:** The stateless JWT is successfully killed mid-flight, without sacrificing the performance of the overall system.
+
+---
 
 ---
 
