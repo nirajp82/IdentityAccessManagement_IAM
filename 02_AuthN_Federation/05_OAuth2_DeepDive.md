@@ -25,7 +25,30 @@ To build a scalable IAM system, you must strictly define the boundaries of the p
 
 ### Roles
 
-* **Resource Owner:** The entity capable of granting access to a protected resource (e.g., Alice, the bank customer).
+* **Resource Owner:**
+  The entity capable of granting access to a protected resource (e.g., Alice, the bank customer).
+
+  * **Dual Responsibilities of the Resource Owner:**
+    For OAuth 2.0 to function securely, the Resource Owner performs two distinct actions during the authorization flow:
+
+    * **Authentication:** Proves *who they are* to the Authorization Server (for example, by logging in with username, password, and MFA). The Client application never sees user credentials.
+    * **Consent (Delegation):** Explicitly grants permission (Scopes) to the Client application (for example, clicking **Allow** when asked to share specific data).
+
+  * **Types of Resource Owners (MoneyGuard Context):**
+
+    * **Human Consumer (External):**
+
+      * **Example:** Alice, a retail banking customer.
+      * **Scenario:** Alice wants to use an external fintech app (“BudgetApp”). Alice is the Resource Owner of her checking account transaction history. She authenticates at `idp.moneyguard.com` and consents to delegate `transactions:read` access to BudgetApp.
+    * **Human Employee (Internal):**
+
+      * **Example:** Bob, a MoneyGuard Wealth Manager.
+      * **Scenario:** Bob logs into the internal **Teller Portal**. Bob is the Resource Owner of his *own corporate identity and session*. He authorizes the Teller Portal (the Client) to call the Core Ledger APIs on his behalf using his assigned employee roles.
+    * **Non-Human Entity (Machine-to-Machine):**
+
+      * **Example:** Fraud Detection Microservice.
+      * **Scenario:** In the **Client Credentials Flow**, no human is present. In this edge case, the Client application *also acts as the Resource Owner*. The microservice owns its own data and processes and authenticates itself to the Authorization Server using a `client_secret` to obtain an Access Token.
+
 * **Client:** The application making requests on behalf of the Resource Owner (e.g., BudgetApp, or MoneyGuard's own Mobile App).
 * **Authorization Server (IAM):** The server that authenticates the Resource Owner, obtains their consent, and issues the tokens (e.g., `auth.moneyguard.com`).
 * **Resource Server:** The API hosting the protected data, which accepts and validates the Access Token (e.g., `api.moneyguard.com`).
