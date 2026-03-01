@@ -397,18 +397,18 @@ To achieve zero downtime and instant security, MoneyGuard divides its architectu
 
 ```mermaid
 flowchart TD
-    subgraph EdgeLayer [1. The Edge Layer (The Bouncers)]
+    subgraph EdgeLayer [1. The Edge Layer - The Bouncers]
         WAF[Web Application Firewall / Load Balancer]
         GW[API Gateway / Policy Enforcement Point]
         Redis[(Redis In-Memory Cache)]
     end
 
-    subgraph IAMLayer [2. IAM Control Plane (The Passport Office)]
+    subgraph IAMLayer [2. IAM Control Plane - The Passport Office]
         AuthZ[Authorization Server Cluster]
         DB[(Distributed Database)]
     end
 
-    subgraph BackendLayer [3. Resource Servers (The Vaults)]
+    subgraph BackendLayer [3. Resource Servers - The Vaults]
         Microservices[Core Banking Microservices]
     end
 
