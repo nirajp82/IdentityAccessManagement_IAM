@@ -55,9 +55,47 @@ To build a scalable IAM system, you must strictly define the boundaries of the p
 
 ### Tokens
 
-* **Access Token:** The "Valet Key." A credential used by the Client to access the Resource Server. It contains permissions but typically hides user identity. *Problem solved: Grants access without exposing credentials.*
-* **Refresh Token:** A long-lived credential used to obtain new Access Tokens when they expire. *Problem solved: Keeps Access Tokens short-lived (secure) without forcing the user to log in repeatedly.*
-* **ID Token (OIDC Extension):** A JSON Web Token (JWT) containing user profile data (name, email). *Problem solved: OAuth 2.0 provides authorization (access), but OpenID Connect (OIDC) adds the ID Token to provide authentication (identity).*
+Here is a much clearer, highly structured rewrite of the **Access Token** concept. It emphasizes the "Valet Key" analogy while explicitly calling out the architectural dangers of confusing authorization with authentication.
+
+You can replace the original Access Token bullet point in your document with this expanded, Staff-level explanation:
+
+---
+
+Here is the **clean, consistent, drop-in replacement formatting**, aligned with the **Resource Owner section style**.
+You can **replace your entire token section as-is**.
+
+---
+
+* **Access Token:**
+  The “Valet Key.” A credential used by the Client application to securely access the Resource Server (API).
+
+  * **Purpose (Authorization, Not Authentication):**
+    Represents *delegated authorization*. It communicates exactly *what* the client is allowed to do (for example, read transactions), but it is **not** intended to prove *who* the user is.
+
+  * **Format Agnostic:**
+    OAuth 2.0 does not define the structure or format of an Access Token. It may be a random opaque string or a structured JSON Web Token (JWT).
+
+  * **The Identity Trap (Architectural Warning):**
+    In modern enterprise systems like MoneyGuard, Access Tokens are commonly implemented as JWTs and may include a subject identifier (`sub`) or other user-related claims. However, **Resource Servers must treat Access Tokens strictly as authorization artifacts and must never use them as proof of user authentication.**
+
+  * **Strict Validation Rules:**
+    When a Resource Server receives an Access Token, authorization decisions must be based *entirely* on validated security claims, including:
+
+    * `iss` — Was the token issued by a trusted Authorization Server?
+    * `aud` — Was the token minted specifically for this API?
+    * `exp` — Is the token still within its valid lifetime?
+    * `scope` / `roles` — Does the token contain the exact permissions required for the requested operation?
+
+  * **Golden Rule:**
+    An API must never grant access or assume a valid user session solely based on the presence of identity-related claims inside an Access Token.
+
+* **Refresh Token:**
+  A long-lived credential used by the Client to obtain new Access Tokens when they expire.
+  *Problem solved: Allows Access Tokens to remain short-lived for security while avoiding frequent user reauthentication.*
+
+* **ID Token (OIDC Extension):**
+  A JSON Web Token (JWT) that contains verified user identity information (for example, subject, name, email).
+  *Problem solved: OAuth 2.0 handles authorization, while OpenID Connect adds authentication by introducing a standardized, verifiable identity token.*
 
 ### Scopes and Claims
 
