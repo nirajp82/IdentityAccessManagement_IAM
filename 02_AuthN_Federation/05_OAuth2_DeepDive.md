@@ -196,6 +196,10 @@ sequenceDiagram
     Note over App: BudgetApp stores the client_id<br/>and client_secret securely in its vault.
 
 ```
+Here is the fully updated **Scenario A**, integrating the detailed, line-by-line breakdown of the token exchange and payload deliveries. I have also adjusted the headers so they match the exact numbering in the updated Mermaid diagram perfectly.
+
+---
+
 ### Scenario A: The External Application (BudgetApp)
 
 **The Setup:** Alice (the Resource Owner) wants to use BudgetApp (the Client) to track her spending. BudgetApp needs permission to pull data from MoneyGuard's APIs (the Resource Server).
@@ -259,11 +263,13 @@ Location: https://budgetapp.com/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=rando
 
 ```
 
-#### Step 5: The Token Exchange (Server to Server)
+#### Step 5: The Token Exchange (The Private Backroom)
 
-BudgetApp's backend extracts the code from the URL. It immediately opens a secure, hidden backend connection to MoneyGuard's Auth Server to trade the code for the Access Token.
+Up until this point, everything happened in Alice's web browser (the "Public Street"). In Step 5, we leave the browser entirely. BudgetApp's backend server opens a direct, encrypted, hidden tunnel straight to MoneyGuard's Auth Server (the "Private Backroom") to trade the code for the Access Token.
 
-* **What it solves:** This is where the **PKCE check** happens. BudgetApp sends the raw `code_verifier` (the secret password). The Auth Server hashes it and ensures it matches the `code_challenge` from Step 1. If a malicious app stole the code in Step 4, they would fail here because they don't know the secret password.
+**The URL:** `POST https://auth.moneyguard.com/token`
+
+**The Raw HTTP Request:**
 
 ```http
 POST /token HTTP/1.1
@@ -278,9 +284,20 @@ grant_type=authorization_code
 
 ```
 
+**Line-by-Line Translation (What BudgetApp is actually saying):**
+
+1. **The "ID Badge" (The Header):** `Authorization: Basic YnVkZ...`
+BudgetApp takes its `client_id` and `client_secret` (from Phase 0), mashes them together, encodes them, and puts them here. This proves BudgetApp is who it says it is.
+2. **The "Action" (The Grant Type):** `grant_type=authorization_code`
+BudgetApp says: *"I am here to trade a temporary code for a real Access Token."*
+3. **The "Receipt" (The Code):** `&code=Splxl...`
+BudgetApp says: *"Here is the exact temporary code Alice brought back to me."*
+4. **The PKCE "Secret Password" (The Verifier):** `&code_verifier=the_raw_secret_password...`
+BudgetApp hands over the **unscrambled, raw secret password**. MoneyGuard scrambles it and checks if it matches the Hint (`code_challenge`) from Step 1. If it matches, the math proves BudgetApp is the legitimate app, and a hacker didn't steal the code in Step 4.
+
 #### Step 6: The Delivery of the Valet Key
 
-The Auth Server successfully verifies the math. It issues the JWT Access Token and a Refresh Token back to the BudgetApp server.
+Because BudgetApp proved its identity (with the `client_secret`) AND proved it was the original requester (with the `code_verifier`), the Auth Server finally opens the vault. It responds with this JSON payload:
 
 ```json
 {
@@ -293,7 +310,15 @@ The Auth Server successfully verifies the math. It issues the JWT Access Token a
 
 ```
 
-#### Step 7: The API Call (Client to Resource Server)
+**Line-by-Line Translation (What MoneyGuard is handing back):**
+
+* **`access_token`:** The actual **Valet Key** (a JWT with the digital "Wax Seal"). BudgetApp will attach this to every API call.
+* **`token_type`: "Bearer":** A strict security rule meaning: *"Whoever physically bears (holds) this token is allowed to use it."* It’s like cash, which is why BudgetApp must keep it safely hidden in its backend.
+* **`expires_in`: 900:** The Valet Key self-destructs in 900 seconds (15 minutes) to limit the damage if it ever gets stolen.
+* **`refresh_token`:** A long-lived "Voucher." In 14 minutes, BudgetApp will quietly send this voucher to the server in the background to get a brand new 15-minute Access Token, so Alice doesn't have to log in again.
+* **`scope`:** A reminder that this specific Valet Key is only authorized for `transactions:read`.
+
+#### Step 7 & 8: The API Call (Client to Resource Server)
 
 BudgetApp now has the Valet Key. In the background, it calls the MoneyGuard API to fetch Alice's data. It attaches the Access Token to the `Authorization` header. The API Gateway verifies the JWT digital signature locally (the math check) and returns the financial data.
 
@@ -303,7 +328,6 @@ Host: api.moneyguard.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 
 ```
-
 ---
 
 ### Scenario B: The Internal Application (Teller Portal)
