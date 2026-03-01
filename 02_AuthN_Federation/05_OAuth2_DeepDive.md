@@ -161,9 +161,22 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
 
 ## 3. Deep Dive: Redirection and Payload Flows
 
-To understand OAuth 2.0, you must track exactly how the browser redirects the user and how the backend servers whisper to each other securely.
+To understand OAuth 2.0, you must track exactly how the browser redirects the user and how the backend servers whisper to each other securely. But before any of that can happen, the two companies must establish trust.
 
-We will look at two distinct flows: an external third-party app, and an internal first-party app. Both use the **Authorization Code Flow with PKCE**, but the user experience and trust levels differ.
+### Phase 0: The Prerequisite Setup (Client Registration)
+
+**The Problem:** MoneyGuard cannot just hand out "Valet Keys" to any website that asks. It needs to know exactly who BudgetApp is, and more importantly, it needs to know exactly where to send the user *after* they log in. If MoneyGuard doesn't have a strict list of safe return addresses, a hacker could trick MoneyGuard into sending the Auth Code to `hacker-site.com/callback`!
+
+**The Solution (The Registration Desk):** Before BudgetApp can write a single line of OAuth code, the developers at BudgetApp must go to MoneyGuard's Developer Portal and register their application.
+
+Here is what happens during that setup:
+
+1. **The Introduction:** BudgetApp tells MoneyGuard, *"I am building a financial tracking app called BudgetApp."*
+2. **The Strict Return Address (`redirect_uri`):** BudgetApp registers the exact, character-for-character URL where it wants users sent back to (e.g., `https://budgetapp.com/callback`). If an auth request ever asks to redirect the user to a different URL, MoneyGuard will instantly block it.
+3. **The ID Badge (`client_id`):** MoneyGuard gives BudgetApp a public identifier (e.g., `budgetapp_client_99`). BudgetApp will put this ID in every URL so MoneyGuard knows who is knocking on the door.
+4. **The Secret Password (`client_secret`):** Because BudgetApp has a secure backend server, MoneyGuard also gives them a highly confidential password. BudgetApp stores this in their digital vault and will use it later to prove they are the real BudgetApp during the Server-to-Server token exchange.
+
+Once Phase 0 is complete, BudgetApp is officially recognized by MoneyGuard, and the real-world flows can begin.
 
 ### Scenario A: The External Application (BudgetApp)
 
