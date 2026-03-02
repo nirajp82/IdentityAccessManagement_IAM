@@ -50,12 +50,20 @@ If you only have 60 seconds, here are the absolute core takeaways for understand
 
 ### 1. Introduction: The Problem OIDC Solves
 
-If OAuth 2.0 was created to solve the **Password Anti-Pattern** (sharing your bank password with a budgeting app), OpenID Connect (OIDC) was created to solve the **Authentication Hack Anti-Pattern**.
+If OAuth 2.0 was created to solve the **Password Anti-Pattern** (sharing your bank password to grant access to your data), OpenID Connect (OIDC) was created to solve the **Authentication Hack Anti-Pattern** (forcing users to create a new password for every single app they use).
 
-Imagine it is 2012. OAuth 2.0 is highly successful at *Authorization* (delegated access). Developers love it. But they have a new problem: they want users to "Log in with Facebook" or "Log in with Google" so they don't have to build their own password databases.
+Let's go back to our "BudgetApp" and "MoneyGuard" bank example to see the exact difference.
 
-**The critical problem:** OAuth 2.0 was explicitly designed to say *what* a user is allowed to do (the **Valet Key**), not *who* the user is (the **ID Badge**).
-Developers started "hacking" OAuth 2.0 to do authentication. They would ask for an Access Token, use it to call a proprietary API (like Facebook's `/me` endpoint), and assume that if the API returned a name, the user was authenticated.
+**The Pure OAuth 2.0 World (Authorizing Data Access):**
+In pure OAuth 2.0, Alice still has to go to BudgetApp's website, click "Sign Up," and create a brand new username and password just to use their app (`alice@email.com` / `Budget123!`). Once she is inside BudgetApp, the app uses OAuth 2.0 to ask MoneyGuard for an Access Token (the Valet Key) so it can read her bank transactions.
+
+* **The Problem:** BudgetApp still has to build, manage, and secure a massive database of user passwords. Users experience "signup fatigue" from creating endless accounts, and hackers love stealing these password databases.
+
+**The Developers' Wish (Outsourcing the Login):**
+Developers at companies like BudgetApp realized: *"I don't want to build a login screen or store passwords at all. I want users to just click a button that says **'Log in with Google'** or **'Log in with MoneyGuard'**, and have that bigger, more secure company vouch for who the user is."*
+
+**The "OAuth Authentication Hack":**
+The issue was that OAuth 2.0 was explicitly designed to say *what* a user is allowed to do (the Valet Key), not *who* the user is (the ID Badge). Because no standard existed yet, developers started "hacking" OAuth 2.0. BudgetApp would ask Google or MoneyGuard for an Access Token, use it to call a proprietary API (like Facebook's `/me` endpoint), and assume that if the API returned a name, the user must be authenticated.
 
 **Why the "OAuth Authentication Hack" was dangerous:**
 
@@ -64,9 +72,11 @@ Developers started "hacking" OAuth 2.0 to do authentication. They would ask for 
 * **No Authentication Context:** The Access Token couldn't tell the app *when* the user logged in, or *how* they logged in (e.g., did they use Multi-Factor Authentication?).
 
 **The Solution: OpenID Connect (OIDC)**
-OIDC (released in 2014) is an identity layer built directly *on top* of OAuth 2.0. It standardizes authentication. Instead of just handing the client an Access Token (the Valet Key), OIDC also hands the client a verifiably signed **ID Token** (the ID Badge).
+OIDC (released in 2014) is an identity layer built directly *on top* of OAuth 2.0. It standardizes authentication. Instead of just handing BudgetApp an Access Token (the Valet Key), OIDC also hands BudgetApp a verifiably signed **ID Token** (the ID Badge).
 
-OIDC answers three fundamental questions for the Client application:
+Now, when Alice clicks **"Log in with MoneyGuard"** on BudgetApp's homepage, she is redirected to her bank, logs in there, and is bounced back to BudgetApp. BudgetApp reads the ID Token, sees Alice's verified identity, and instantly creates a session for her. **She is now logged into BudgetApp, and BudgetApp never had to ask for, or store, a password.**
+
+OIDC answers three fundamental questions for the Client application (BudgetApp):
 
 1. *Who is this user?*
 2. *When did they log in?*
