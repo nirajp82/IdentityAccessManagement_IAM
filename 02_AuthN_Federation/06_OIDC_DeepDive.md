@@ -52,6 +52,9 @@ If OAuth 2.0 was created to solve the **Password Anti-Pattern** (sharing your ba
 
 Imagine it is 2012. OAuth 2.0 is highly successful at *Authorization* (delegated access). Developers love it. But they have a new problem: they want users to "Log in with Facebook" or "Log in with Google" so they don't have to build their own password databases.
 
+> **OAuth 2.0** is a framework for **authorization** — it allows a user to grant a third-party application delegated access to their resources (usually APIs) without sharing credentials.
+> **OpenID Connect (OIDC)** is an identity layer built on top of OAuth 2.0 that adds **authentication** — it lets applications verify the user’s identity.
+
 **The critical problem:** OAuth 2.0 was explicitly designed to say *what* a user is allowed to do (the **Valet Key**), not *who* the user is (the **ID Badge**).
 Developers started "hacking" OAuth 2.0 to do authentication. They would ask for an Access Token, use it to call a proprietary API (like Facebook's `/me` endpoint), and assume that if the API returned a name, the user was authenticated.
 
