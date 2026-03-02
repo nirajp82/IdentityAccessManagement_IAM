@@ -158,27 +158,38 @@ Let's look at how the standard **Authorization Code Flow with PKCE** changes whe
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Alice as Alice (End-User)
-    participant BudgetApp as BudgetApp (Relying Party)
-    participant MoneyGuard as MoneyGuard (OpenID Provider)
+    actor Alice
+    participant Browser as Alice's Browser
+    participant BudgetApp as BudgetApp (Client)
+    participant MoneyGuard as MoneyGuard (OP)
 
-    Note over BudgetApp: Generates "nonce" & PKCE "code_challenge"<br/>Saves "nonce" in local cookie
+    Note over BudgetApp: Generates nonce & PKCE code_challenge<br/>Saves nonce in backend session
     
-    BudgetApp->>MoneyGuard: 1. Auth Request (GET /authorize)<br/>Sends nonce & code_challenge
+    Alice->>Browser: Clicks Login on BudgetApp
+    Browser->>BudgetApp: GET /login
     
-    MoneyGuard-->>Alice: Prompts for Login & Consent
-    Alice->>MoneyGuard: Enters credentials & approves access
+    BudgetApp-->>Browser: HTTP 302 Redirect to MoneyGuard
+    Note over Browser: URL includes nonce & code_challenge
     
-    MoneyGuard->>BudgetApp: Returns Authorization Code
+    Browser->>MoneyGuard: GET /authorize (Front-Channel)
     
-    BudgetApp->>MoneyGuard: 2. Token Exchange (POST /token)<br/>Trades Auth Code + PKCE code_verifier
+    MoneyGuard-->>Alice: Prompts for credentials
+    Alice->>MoneyGuard: Enters password & consents
     
-    MoneyGuard->>BudgetApp: 3. OIDC Response<br/>Returns access_token & id_token
+    MoneyGuard-->>Browser: HTTP 302 Redirect to BudgetApp
+    Note over Browser: URL includes Authorization Code
     
-    Note over BudgetApp: 4. Validates id_token locally<br/>- Signature valid?<br/>- Issuer == MoneyGuard?<br/>- Audience == BudgetApp?<br/>- Token nonce == Local cookie nonce?<br/>- Not expired?
+    Browser->>BudgetApp: Delivers Auth Code (Front-Channel)
     
-    Note over BudgetApp: All checks pass!<br/>Creates local session cookie for Alice
-    BudgetApp-->>Alice: Login Successful!
+    BudgetApp->>MoneyGuard: POST /token (Back-Channel)
+    Note over BudgetApp, MoneyGuard: Trades Auth Code + PKCE code_verifier
+    
+    MoneyGuard-->>BudgetApp: Returns access_token & id_token
+    
+    Note over BudgetApp: Validates id_token locally<br/>Checks if Token Nonce == Session Nonce
+    
+    BudgetApp-->>Browser: HTTP 302 Redirect to Dashboard
+    Browser-->>Alice: Displays logged-in homepage
 
 ```
 
