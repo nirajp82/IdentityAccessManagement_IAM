@@ -155,6 +155,39 @@ A standardized API endpoint (`/userinfo`) hosted by the OpenID Provider. If the 
 
 Let's look at how the standard **Authorization Code Flow with PKCE** changes when we add OIDC.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Alice as Alice (End-User)
+    participant BudgetApp as BudgetApp (Relying Party / Client)
+    participant MoneyGuard as MoneyGuard (OpenID Provider / OP)
+
+    Note over BudgetApp: Generates 'nonce' & PKCE 'code_challenge'<br/>Saves 'nonce' in local session/cookie
+    
+    %% Step 1
+    BudgetApp->>MoneyGuard: Step 1: GET /authorize<br/>(scope=openid..., nonce, code_challenge)
+    
+    %% User Authentication
+    MoneyGuard-->>Alice: Prompts for Login & Consent
+    Alice->>MoneyGuard: Enters credentials & approves access
+    
+    %% Auth Code Return
+    MoneyGuard->>BudgetApp: Returns Authorization Code
+    
+    %% Step 2
+    BudgetApp->>MoneyGuard: Step 2: POST /token<br/>(Trades Auth Code + PKCE 'code_verifier')
+    
+    %% Step 3
+    MoneyGuard->>BudgetApp: Step 3: Token Response<br/>(Returns access_token & id_token)
+    
+    %% Step 4
+    Note over BudgetApp: Step 4: Validates id_token locally<br/>1. Signature valid?<br/>2. iss == MoneyGuard?<br/>3. aud == BudgetApp?<br/>4. nonce == local cookie nonce?<br/>5. exp == Token not expired?
+    
+    %% Login Success
+    Note over BudgetApp: All checks pass!<br/>Creates local session cookie for Alice
+    BudgetApp-->>Alice: You are officially logged in!
+
+
 #### Step 1: The Authentication Request
 
 BudgetApp wants to log Alice in and read her bank transactions. Notice the addition of the `openid` scope and the `nonce` parameter.
