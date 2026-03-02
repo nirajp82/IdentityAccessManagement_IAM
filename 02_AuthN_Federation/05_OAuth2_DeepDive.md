@@ -501,12 +501,32 @@ Here are the four most common attacks, the plain English analogies of how they w
 
 ### Attack 1: CSRF (Cross-Site Request Forgery) on the Callback
 
-* **The Plain English Analogy (The "Bait and Switch"):** Imagine a hacker, Mallory, wants free money. Mallory logs into *her own* BudgetApp account and clicks "Connect to MoneyGuard." The bank generates an Auth Code for Mallory's account, but Mallory stops her browser before it can deliver the code back to BudgetApp.
-Instead, Mallory takes that code and emails a phishing link to Alice. Alice clicks the link. Alice's browser unknowingly submits *Mallory's* code to BudgetApp.
-BudgetApp thinks, *"Great! Alice is logged in, and here is her code!"* BudgetApp links Alice's profile to Mallory's bank account. If Alice transfers $500 into BudgetApp, it actually goes straight into Mallory's bank account!
-* **The Technical Mitigation (The `state` parameter):**
-To prevent this, we use the `state` parameter. When Alice clicks "Connect Bank," BudgetApp generates a random string (e.g., `xyz888`) and saves it in a secure cookie on Alice's computer. It sends `xyz888` to the bank. When the bank sends the code back, it includes `xyz888`.
-BudgetApp checks: *"Does the state in the URL match the cookie on this computer?"* If Mallory tries to trick Alice into submitting a code, the `state` will be missing or wrong, and BudgetApp will block the "Bait and Switch."
+**The Attack (The "Bait and Switch"):**
+This attack happens when a hacker forces a victim to unknowingly link the hacker's bank account to the victim's app profile.
+
+1. **The Setup:** Hacker Mallory logs into *her own* BudgetApp account. She clicks "Connect Bank" and logs into her MoneyGuard bank account.
+2. **The Trap:** MoneyGuard generates an Auth Code for Mallory’s bank account and redirects her browser back to `budgetapp.com/callback?code=MALLORYS_CODE`.
+*However, Mallory quickly clicks the "Stop" button on her browser before the page loads.* She copies that URL.
+3. **The Bait:** Mallory sends a deceptive email to Alice: *"Click here to see a cute cat!"* with that exact copied URL hidden behind the link.
+4. **The Switch:** Alice is currently logged into *her own* BudgetApp profile on her computer. Alice clicks the cat link. Her browser is instantly sent to `budgetapp.com/callback?code=MALLORYS_CODE`.
+5. **The Disaster:** BudgetApp sees Alice is logged in. It sees the Auth Code arrive. BudgetApp assumes Alice just finished connecting her bank. BudgetApp trades the code for a token and permanently links **Mallory's MoneyGuard bank account** to **Alice's BudgetApp profile**.
+6. **The Payoff:** Alice logs into BudgetApp, thinks everything is fine, and clicks "Deposit $500 to my savings." Because the backend is wired to Mallory's token, Alice's $500 is deposited directly into Mallory's bank account!
+
+**The Technical Mitigation (The `state` parameter):**
+To stop this, BudgetApp must have a way to guarantee that the person who *started* the bank connection is the exact same person who *finished* it. We solve this using a "Secret Handshake" called the `state` parameter.
+
+1. **The Handshake Generation:** When Alice clicks "Connect Bank" in BudgetApp, BudgetApp generates a random, unguessable string (e.g., `state=XYZ_123`).
+2. **Storing the Secret:** BudgetApp hides `XYZ_123` inside a secure cookie directly on Alice’s computer.
+3. **Sending the Secret:** BudgetApp sends Alice to MoneyGuard, passing the secret along in the URL: `GET /authorize?state=XYZ_123`.
+4. **The Return Trip:** MoneyGuard is programmed to always echo the exact same state back. When the Auth Code comes back, the URL looks like this: `?code=ALICES_CODE&state=XYZ_123`.
+5. **The Final Check:** BudgetApp receives the code. Before doing *anything*, it looks at the `state` in the URL (`XYZ_123`) and compares it to the cookie saved on Alice's computer (`XYZ_123`). Since they match perfectly, BudgetApp knows Alice started this flow herself, and allows the connection.
+
+**How this traps Mallory:**
+If Mallory tries the exact same hack again, she generates a link with her own state: `?code=MALLORYS_CODE&state=MALLORYS_SECRET`.
+When Alice is tricked into clicking the link, BudgetApp looks at the URL (`MALLORYS_SECRET`). Then, it checks Alice's computer for a matching cookie. **Alice's computer does not have Mallory's cookie.** The handshake fails. BudgetApp realizes a CSRF attack is happening, throws an error, and protects Alice's money.
+
+---
+
 
 ### Attack 2: Authorization Code Interception
 
