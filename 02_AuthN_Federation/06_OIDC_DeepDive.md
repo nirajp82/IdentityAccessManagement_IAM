@@ -346,8 +346,6 @@ sequenceDiagram
 
 ## Part III: Real-World Use Cases
 
-You are absolutely right. While we covered the *mechanics* of OIDC, the best way to understand its value is to see exactly where and why architectural teams choose to implement it in the wild.
-
 Here are four of the most common, real-world scenarios where OIDC is the undisputed gold standard, complete with practical examples of the problems it solves.
 
 ### 9.1 The "Social Login" (Consumer Applications / B2C)
