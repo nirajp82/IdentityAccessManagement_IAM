@@ -383,6 +383,14 @@ Because the React app doesn't have a permanent `client_secret` to prove who it i
 
 **Summary:** PKCE exists because front-end applications (React, Angular, iOS, Android) cannot safely store a permanent `client_secret`. It solves the "Authorization Code Interception Attack" by forcing the app to dynamically prove it is the exact same app that started the login process.
 
+**Q: If the app scrambles the password, how does the Auth Server know which mathematical formula to use to check it later?**
+
+**A:** It uses an "instruction manual" sent during the very first step.
+
+When the React app sends the scrambled hint to MoneyGuard in Step 1, it includes a specific parameter in the URL: `&code_challenge_method=S256`.
+
+By sending `S256`, the app is explicitly telling the Auth Server: *"I scrambled this hint using the universal SHA-256 cryptography algorithm."* The Auth Server saves this instruction. Later, in Step 5, when the app hands over the raw password, the Auth Server knows to run it through that exact same SHA-256 formula. Because both sides use the exact same universal formula, the resulting hashes match perfectly!
+
 ---
 
 ## 4. System Architecture: Scaling OAuth 2.0 at MoneyGuard
