@@ -159,37 +159,39 @@ Let's look at how the standard **Authorization Code Flow with PKCE** changes whe
 sequenceDiagram
     autonumber
     actor Alice
-    participant Browser as Alice's Browser
+    participant Browser
     participant BudgetApp as BudgetApp (Client)
     participant MoneyGuard as MoneyGuard (OP)
 
+    %% Step 1: User Initiates
+    Alice->>Browser: Clicks "Login"
+    Browser->>BudgetApp: GET /login (Initiate flow)
+    
+    %% Step 2: Client Prepares
     Note over BudgetApp: Generates nonce & PKCE code_challenge<br/>Saves nonce in backend session
     
-    Alice->>Browser: Clicks Login on BudgetApp
-    Browser->>BudgetApp: GET /login
-    
-    BudgetApp-->>Browser: HTTP 302 Redirect to MoneyGuard
-    Note over Browser: URL includes nonce & code_challenge
-    
+    %% Step 3: Redirect to OP
+    BudgetApp-->>Browser: HTTP 302 Redirect to MoneyGuard<br/>(Includes nonce & code_challenge)
     Browser->>MoneyGuard: GET /authorize (Front-Channel)
     
-    MoneyGuard-->>Alice: Prompts for credentials
-    Alice->>MoneyGuard: Enters password & consents
+    %% Step 4: User Authenticates via Browser
+    MoneyGuard-->>Browser: Sends login page
+    Browser-->>Alice: Displays login page
+    Alice->>Browser: Enters password & consents
+    Browser->>MoneyGuard: Submits credentials
     
-    MoneyGuard-->>Browser: HTTP 302 Redirect to BudgetApp
-    Note over Browser: URL includes Authorization Code
+    %% Step 5: OP Returns Auth Code
+    MoneyGuard-->>Browser: HTTP 302 Redirect to BudgetApp<br/>(Includes Auth Code)
+    Browser->>BudgetApp: GET /callback?code=123... (Front-Channel)
     
-    Browser->>BudgetApp: Delivers Auth Code (Front-Channel)
-    
-    BudgetApp->>MoneyGuard: POST /token (Back-Channel)
-    Note over BudgetApp, MoneyGuard: Trades Auth Code + PKCE code_verifier
-    
+    %% Step 6: Server-to-Server Token Exchange
+    BudgetApp->>MoneyGuard: POST /token (Back-Channel)<br/>Sends Auth Code + PKCE code_verifier
     MoneyGuard-->>BudgetApp: Returns access_token & id_token
     
+    %% Step 7: Validation and Login
     Note over BudgetApp: Validates id_token locally<br/>Checks if Token Nonce == Session Nonce
-    
     BudgetApp-->>Browser: HTTP 302 Redirect to Dashboard
-    Browser-->>Alice: Displays logged-in homepage
+    Browser-->>Alice: Displays logged-in homepage!
 
 ```
 
