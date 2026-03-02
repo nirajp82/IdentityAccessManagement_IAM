@@ -84,8 +84,12 @@ It sounds logical, but it has a massive, fatal security flaw. **Access Tokens do
 1. Alice visits *SketchyLoanApp* and clicks "Log in with MoneyGuard".
 2. MoneyGuard gives the hacker an Access Token for Alice's profile.
 3. The hacker takes Alice's Access Token and secretly injects it into **BudgetApp's** backend.
-4. BudgetApp takes the hacker's injected token, calls MoneyGuard's `/profile` API, and MoneyGuard responds: `{"name": "Alice"}`.
-5. BudgetApp assumes Alice is logging in, **but it is actually the hacker.** The hacker is now logged into BudgetApp as Alice, and can steal all her budgeting data.
+   - **The Theft:** The hacker somehow steals Alice’s valid token (maybe through a phishing link, malware, or a leaky server).
+   - **The Intercept:** The hacker goes to BudgetApp and logs in normally using their *own* hacker account. But, right before their browser sends the final confirmation data to BudgetApp's backend server, they hit "pause" on their web traffic.
+   - **The Swap:** While the traffic is paused, the hacker deletes their own token from the request and pastes in Alice’s token.
+   - **The Execution:** The hacker unpauses the traffic, forwarding the modified request to BudgetApp's backend.  
+5. BudgetApp takes the hacker's injected token, calls MoneyGuard's `/profile` API, and MoneyGuard responds: `{"name": "Alice"}`.
+6. BudgetApp assumes Alice is logging in, **but it is actually the hacker.** The hacker is now logged into BudgetApp as Alice, and can steal all her budgeting data.
 
 Because BudgetApp just assumed *"if the API returns a name, it must be the real user,"* it got completely tricked.
 
