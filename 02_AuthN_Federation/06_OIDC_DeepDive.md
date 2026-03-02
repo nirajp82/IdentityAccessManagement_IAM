@@ -712,3 +712,151 @@ public class TransactionsController : ControllerBase
 1. **Automatic Key Rotation:** If your Identity Provider rotates its cryptographic keys, ASP.NET Core will automatically notice that incoming tokens are failing signature validation. It will silently reach out to the `.well-known` endpoint, download the *new* public keys, update its cache, and re-validate the token without dropping the user's request.
 2. **Zero Boilerplate:** You don't have to write try/catch blocks for expired tokens or invalid signatures. If the token is invalid, the middleware intercepts it and immediately returns an HTTP `401 Unauthorized` response to the client.
 3. **Claim Mapping:** The framework takes the raw JSON payload of the JWT and seamlessly maps it into the standard .NET `ClaimsPrincipal` object (`HttpContext.User`), allowing you to use native C# authorization patterns.
+
+To build a truly secure system, just knowing *who* the user is (Authentication) isn't enough. You need to know *what they are allowed to do* (Authorization).
+
+If a user logs in with a valid OIDC token, the `[Authorize]` attribute lets them into the API. But we don't want a standard customer to be able to hit the `DELETE /api/accounts` endpoint!
+
+This is where **Role-Based Access Control (RBAC)** and **ASP.NET Core Policies** come in. Here is how to map the claims inside your JWT to strict access rules in your API.
+
+---
+
+### 1. The Setup: What the Token Looks Like
+
+Before we write code, let's look at what the Identity Provider (IdP) is handing us. When the user logs in, your IdP (like Okta or Entra ID) includes specific claims in the Access Token or ID Token.
+
+```json
+{
+  "sub": "alice_smith_123",
+  "iss": "https://auth.moneyguard.com",
+  "aud": "api.moneyguard.com",
+  "scope": "transactions:read transactions:write",
+  "roles": ["Admin", "Teller"]
+}
+
+```
+
+* **`scope`**: Usually represents what the *application* is allowed to do on the user's behalf.
+* **`roles`**: Represents the user's actual job or permission level within the organization.
+
+ASP.NET Core reads this JSON and turns it into a list of `Claim` objects in memory.
+
+---
+
+### 2. Defining Policies in `Program.cs`
+
+Instead of writing messy `if (user.role == "Admin")` statements inside every single controller, ASP.NET uses a centralized **Policy Engine**. You define your business rules once in `Program.cs`.
+
+Add the `AddAuthorization` service right after your JWT Authentication setup:
+
+```csharp
+// 1. Authentication Setup (from the previous step)
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options => { /* ... Authority & Audience config ... */ });
+
+// 2. Authorization Setup (The Policy Engine)
+builder.Services.AddAuthorization(options =>
+{
+    // Policy A: Checking for a specific Role
+    options.AddPolicy("RequireAdminRole", policy => 
+        policy.RequireRole("Admin"));
+
+    // Policy B: Checking for a specific Scope (Delegated Permission)
+    options.AddPolicy("CanWriteTransactions", policy =>
+        policy.RequireAssertion(context =>
+        {
+            // OAuth scopes usually come in as a single space-separated string claim
+            var scopeClaim = context.User.FindFirst("scope")?.Value;
+            return scopeClaim != null && scopeClaim.Contains("transactions:write");
+        }));
+
+    // Policy C: Complex Business Logic (Role AND Scope)
+    options.AddPolicy("SuperUserAccess", policy =>
+        policy.RequireRole("Admin")
+              .RequireClaim("department", "fraud_team"));
+});
+
+```
+
+### 3. Enforcing Policies on Your Endpoints
+
+Now that your rules are defined centrally, applying them to your API endpoints is incredibly clean. You simply pass the policy name into the `[Authorize]` attribute.
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/v1/[controller]")]
+public class TransactionsController : ControllerBase
+{
+    // Anyone with a valid token can access this (Basic Auth)
+    [Authorize]
+    [HttpGet]
+    public IActionResult GetAll()
+    {
+        return Ok("Here are the transactions.");
+    }
+
+    // Only users with the "transactions:write" scope can access this
+    [Authorize(Policy = "CanWriteTransactions")]
+    [HttpPost]
+    public IActionResult CreateTransaction([FromBody] TransactionDto data)
+    {
+        return Ok("Transaction created successfully.");
+    }
+
+    // Only actual Admins can access this highly sensitive endpoint
+    [Authorize(Policy = "RequireAdminRole")]
+    [HttpDelete("{id}")]
+    public IActionResult DeleteTransaction(string id)
+    {
+        return Ok($"Transaction {id} permanently deleted.");
+    }
+}
+
+```
+
+### How It Works Behind the Scenes
+
+1. A request comes in to `DELETE /api/v1/transactions/99`.
+2. The **JwtBearer Middleware** intercepts it, checks the math on the digital signature, and builds the `User` object.
+3. The **Authorization Middleware** sees the `[Authorize(Policy = "RequireAdminRole")]` attribute.
+4. It looks up the policy in your configuration and says, *"Does this user have a claim named 'role' with the value 'Admin'?"*
+5. If the claim is missing, ASP.NET instantly short-circuits the request and returns a **`403 Forbidden`** HTTP response. Your controller code is entirely protected.
+
+---
+
+### The "Role Claim Type" Gotcha
+
+If you implement this and your `RequireRole("Admin")` policy keeps failing (returning 403 Forbidden) even though you *know* the token has `"roles": ["Admin"]` inside it, you likely hit the classic Microsoft mapping gotcha.
+
+By default, the old Microsoft identity libraries look for a very specific, ugly SOAP XML claim type for roles: `http://schemas.microsoft.com/ws/2008/06/identity/claims/role`.
+Modern JWTs just use the simple word `"roles"`.
+
+**The Fix:** Tell the JWT middleware to stop trying to map claims to the old XML format, and just use the exact names from the JSON payload. Add this line *before* your builder setup:
+
+```csharp
+using System.IdentityModel.Tokens.Jwt;
+
+// Turn off Microsoft's legacy claim mapping!
+JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear(); 
+
+var builder = WebApplication.CreateBuilder(args);
+// ... continue with builder.Services...
+
+```
+
+Then, update your JWT options to tell it exactly which claim represents the role:
+
+```csharp
+options.TokenValidationParameters = new TokenValidationParameters
+{
+    // Tell ASP.NET that "roles" is the claim array that holds the user's roles
+    RoleClaimType = "roles", 
+    NameClaimType = "name"
+};
+
+```
+
+---
