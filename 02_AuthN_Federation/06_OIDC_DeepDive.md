@@ -48,7 +48,7 @@ If you only have 60 seconds, here are the absolute core takeaways for understand
 
 ## Part I: The Protocol
 
-### 1. Introduction: The Problem OIDC Solves
+#### 1. Introduction: The Problem OIDC Solves
 
 If OAuth 2.0 was created to solve the **Password Anti-Pattern** (sharing your bank password to grant access to your data), OpenID Connect (OIDC) was created to solve the **Authentication Hack Anti-Pattern** (forcing users to create a new password for every single app they use).
 
@@ -57,44 +57,45 @@ Let's go back to our "BudgetApp" and "MoneyGuard" bank example to see the exact 
 **The Pure OAuth 2.0 World (Authorizing Data Access):**
 In pure OAuth 2.0, Alice still has to go to BudgetApp's website, click "Sign Up," and create a brand new username and password just to use their app (`alice@email.com` / `Budget123!`). Once she is inside BudgetApp, the app uses OAuth 2.0 to ask MoneyGuard for an Access Token (the Valet Key) so it can read her bank transactions.
 
-* **The Problem:** BudgetApp still has to build, manage, and secure a massive database of user passwords. Users experience "signup fatigue" from creating endless accounts, and hackers love stealing these password databases.
+**The Problem:** BudgetApp still has to build, manage, and secure a massive database of user passwords. Users experience "signup fatigue" from creating endless accounts, and hackers love stealing these password databases.
 
 **The Developers' Wish (Outsourcing the Login):**
-Developers at companies like BudgetApp realized: *"I don't want to build a login screen or store passwords at all. I want users to just click a button that says **'Log in with Google'** or **'Log in with MoneyGuard'**, and have that bigger, more secure company vouch for who the user is."*
+Developers at companies like BudgetApp realized: *"I don't want to build a login screen or store passwords at all. I want users to just click a button that says **'Log in with MoneyGuard'** (just like 'Log in with Google'), and have the bank vouch for who the user is."*
 
-### The Problem: You only have a Valet Key
+#### The Problem: You only have a Valet Key
 
-Under pure OAuth 2.0, when a user clicks your "Log in with Facebook" button, Facebook hands BudgetApp an **Access Token**.
+Under pure OAuth 2.0, when a user clicks the "Log in with MoneyGuard" button, the bank hands BudgetApp an **Access Token**.
 
-Remember our analogy: The Access Token is just a **Valet Key**. It grants *permission* to do something (like read the user's Facebook photos). It does **not** contain any information about who the user actually is. It’s just a random string of letters and numbers (e.g., `xyz123`).
+Remember our analogy: The Access Token is just a **Valet Key**. It grants *permission* to do something (like read the user's account balance). It does **not** contain any information about who the user actually is. It’s just a random string of letters and numbers (e.g., `xyz123`).
 
-### The "Hack" (How developers faked a login)
+#### The "Hack" (How developers faked a login)
 
-Since the Access Token didn't tell BudgetApp who the user was, developers got creative and built a workaround. Here is exactly what the code did:
+Since the Access Token didn't tell BudgetApp who the user was, developers got creative and built a workaround. Here is exactly what the old code did:
 
-1. **Get the Token:** BudgetApp gets the Access Token (`xyz123`) from Facebook.
-2. **Call the API:** BudgetApp takes that token and makes a backend HTTP call to Facebook's profile API (which was located at the URL `/me`).
-3. **Read the Response:** Facebook's API looks at the token, sees it is valid, and returns a JSON response: `{"name": "Alice", "email": "alice@bank.com"}`.
-4. **The Dangerous Assumption:** BudgetApp's code says: *"Okay, I used the token, and Facebook told me this token belongs to Alice. Therefore, the person sitting at the keyboard right now MUST be Alice. I will create a session and log her in."*
+1. **Get the Token:** BudgetApp gets the Access Token (`xyz123`) from MoneyGuard.
+2. **Call the API:** BudgetApp takes that token and makes a backend HTTP call to MoneyGuard's profile API (e.g., `/v1/profile`).
+3. **Read the Response:** MoneyGuard's API looks at the token, sees it is valid, and returns a JSON response: `{"name": "Alice", "email": "alice@moneyguard.com"}`.
+4. **The Dangerous Assumption:** BudgetApp's code says: *"Okay, I used the token, and MoneyGuard told me this token belongs to Alice. Therefore, the person sitting at the keyboard right now MUST be Alice. I will create a session and log her in."*
 
-### Why was this so dangerous? (The Token Substitution Attack)
+#### Why was this so dangerous? (The Token Substitution Attack)
 
-It sounds logical, but it has a massive, fatal security flaw. **Access Tokens do not say *who* they were issued to.** Imagine a hacker builds a malicious app called *https://www.google.com/search?q=FreeCatPictures.com*.
+It sounds logical, but it has a massive, fatal security flaw. **Access Tokens do not say *who* they were issued to.** Imagine a hacker builds a malicious app called *SketchyLoanApp*.
 
-1. Alice visits *https://www.google.com/search?q=FreeCatPictures.com* and clicks "Log in with Facebook".
-2. Facebook gives the hacker an Access Token for Alice's profile.
+1. Alice visits *SketchyLoanApp* and clicks "Log in with MoneyGuard".
+2. MoneyGuard gives the hacker an Access Token for Alice's profile.
 3. The hacker takes Alice's Access Token and secretly injects it into **BudgetApp's** backend.
-4. BudgetApp takes the hacker's injected token, calls Facebook's `/me` API, and Facebook responds: `{"name": "Alice"}`.
-5. BudgetApp assumes Alice is logging in, **but it is actually the hacker.** The hacker is now logged into BudgetApp as Alice, and can steal all her financial data.
+4. BudgetApp takes the hacker's injected token, calls MoneyGuard's `/profile` API, and MoneyGuard responds: `{"name": "Alice"}`.
+5. BudgetApp assumes Alice is logging in, **but it is actually the hacker.** The hacker is now logged into BudgetApp as Alice, and can steal all her budgeting data.
 
 Because BudgetApp just assumed *"if the API returns a name, it must be the real user,"* it got completely tricked.
 
-### How OIDC fixed this
+#### How OIDC fixed this
 
 OIDC fixed this by inventing the **ID Token** (The ID Badge).
 
-Now, instead of BudgetApp blindly calling a `/me` API with a Valet Key, OIDC hands BudgetApp an ID Token that explicitly states:
-*"I am Facebook. The user is Alice. She logged in 5 seconds ago. **And most importantly, this token was minted SPECIFICALLY for BudgetApp.**"* If the hacker tries to inject the *FreeCatPictures* token into BudgetApp today, BudgetApp will look at the ID Token, see that it was minted for a different app, and instantly reject it.
+Now, instead of BudgetApp blindly calling a `/profile` API with a Valet Key, OIDC hands BudgetApp an ID Token that explicitly states: *"I am MoneyGuard. The user is Alice. She logged in 5 seconds ago. **And most importantly, this token was minted SPECIFICALLY for BudgetApp.***"
+
+If the hacker tries to inject the *SketchyLoanApp* token into BudgetApp today, BudgetApp will look at the ID Token, see that the "Audience" (`aud`) claim is meant for a different app, and instantly reject it.
 
 Now, when Alice clicks **"Log in with MoneyGuard"** on BudgetApp's homepage, she is redirected to her bank, logs in there, and is bounced back to BudgetApp. BudgetApp reads the ID Token, sees Alice's verified identity, and instantly creates a session for her. **She is now logged into BudgetApp, and BudgetApp never had to ask for, or store, a password.**
 
