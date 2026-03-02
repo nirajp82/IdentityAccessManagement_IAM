@@ -119,7 +119,7 @@ OIDC uses the exact same underlying plumbing as OAuth 2.0, but it renames a few 
 
 * **End-User (Resource Owner):** The human logging in.
 * **Relying Party (RP):** The Client application (e.g., BudgetApp). It "relies" on the OpenID Provider to verify the user's identity.
-* **OpenID Provider (OP):** The Authorization Server that supports OIDC (e.g., Google, Okta, MoneyGuard IAM). It authenticates the user and issues the tokens.
+* **OpenID Provider (OP):** The Authorization Server that supports OIDC (e.g., Google, Okta, MoneyGuard IAM). It authenticates the user and issues the tokens. When Alice went to use BudgetApp, BudgetApp redirected her to the OP. The OP is the server that said, "Hi Alice, please enter your password." Once she did, the OP is the entity that created the Access Token and handed it back to be used with BudgetApp.
 
 #### Tokens
 
