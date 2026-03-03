@@ -50,14 +50,14 @@ Now that we have some of the OAuth 2.0 vocabulary handy, let’s revisit the exa
 
 <img width="800" height="1928" alt="image" src="https://github.com/user-attachments/assets/65bf10a6-9a8d-4932-9c4a-6ee7d5dfa060" />
 
-You, the Resource Owner, want to allow “Terrible Pun of the Day,” the Client, to access your contacts so they can send invitations to all your friends.
-The Client redirects your browser to the Authorization Server and includes with the request the Client ID, Redirect URI, Response Type, and one or more Scopes it needs.
-The Authorization Server verifies who you are, and if necessary prompts for a login.
-The Authorization Server presents you with a Consent form based on the Scopes requested by the Client. You grant (or deny) permission.
-The Authorization Server redirects back to Client using the Redirect URI along with an Authorization Code.
-The Client contacts the Authorization Server directly (does not use the Resource Owner’s browser) and securely sends its Client ID, Client Secret, and the Authorization Code.
-The Authorization Server verifies the data and responds with an Access Token.
-The Client can now use the Access Token to send requests to the Resource Server for your contacts.
+- You, the Resource Owner, want to allow “Terrible Pun of the Day,” the Client, to access your contacts so they can send invitations to all your friends.
+- The Client redirects your browser to the Authorization Server and includes with the request the Client ID, Redirect URI, Response Type, and one or more Scopes it needs.
+- The Authorization Server verifies who you are, and if necessary prompts for a login.
+- The Authorization Server presents you with a Consent form based on the Scopes requested by the Client. You grant (or deny) permission.
+- The Authorization Server redirects back to Client using the Redirect URI along with an Authorization Code.
+- The Client contacts the Authorization Server directly (does not use the Resource Owner’s browser) and securely sends its Client ID, Client Secret, and the Authorization Code.
+- The Authorization Server verifies the data and responds with an Access Token.
+- The Client can now use the Access Token to send requests to the Resource Server for your contacts.
 
 
 ### Client ID and Secret
@@ -68,34 +68,31 @@ Client receives the Client ID and Client Secret from the Authorization Server
 
 As the name implies, the Client Secret must be kept secret so that only the Client and Authorization Server know what it is. This is how the Authorization Server can verify the Client.
 
-That’s Not All Folks… Please Welcome OpenID Connect
+#### That’s Not All Folks… Please Welcome OpenID Connect
 OAuth 2.0 is designed only for authorization, for granting access to data and features from one application to another. OpenID Connect (OIDC) is a thin layer that sits on top of OAuth 2.0 that adds login and profile information about the person who is logged in. Establishing a login session is often referred to as authentication, and information about the person logged in (i.e. the Resource Owner) is called identity. When an Authorization Server supports OIDC, it is sometimes called an identity provider, since it provides information about the Resource Owner back to the Client.
 
 OpenID Connect enables scenarios where one login can be used across multiple applications, also known as single sign-on (SSO). For example, an application could support SSO with social networking services such as Facebook or Twitter so that users can choose to leverage a login they already have and are comfortable using.
 <img width="800" height="840" alt="image" src="https://github.com/user-attachments/assets/d5de6f45-073e-44f9-80e8-e75ae31fb1ad" />
 
-FleaMail SSO
-
 The OpenID Connect flow looks the same as OAuth. The only differences are, in the initial request, a specific scope of openid is used, and in the final exchange the Client receives both an Access Token and an ID Token.
 
-Terrible Pun of the Day OIDC Example
+<img width="800" height="1928" alt="Terrible Pun of the Day OIDC Example" src="https://github.com/user-attachments/assets/94863087-15bb-4be9-b029-89882fe08ee0" />
 
 As with the OAuth flow, the OpenID Connect Access Token is a value the Client doesn’t understand. As far as the Client is concerned, the Access Token is just a string of gibberish to pass with any request to the Resource Server, and the Resource Server knows if the token is valid. The ID Token, however, is very different.
 
-Jot This Down: An ID Token is a JWT
+### Jot This Down: An ID Token is a JWT
 An ID Token is a specifically formatted string of characters known as a JSON Web Token, or JWT. JWTs are sometimes pronounced “jots.” A JWT may look like gibberish to you and me, but the Client can extract information embedded in the JWT such as your ID, name, when you logged in, the ID Token expiration, and if anything has tried to tamper with the JWT. The data inside the ID Token are called claims.
 
-Terrible Pun of the Day Examines an ID Token
+<img width="800" height="560" alt="Terrible Pun of the Day Examines an ID Token" src="https://github.com/user-attachments/assets/32b98bc5-abb5-4f2a-8070-8b9925c69cee" />
 
 With OIDC, there’s also a standard way the Client can request additional identity information from the Authorization Server, such as their email address, using the Access Token.
 
 Learn More About OAuth and OIDC
 That’s OAuth and OIDC in a nutshell! Ready to dig deeper? Here are some additional resources to help you learn more about OAuth 2.0 and OpenID Connect!
 
-What the Heck is OAuth?
-Nobody Cares About OAuth or OpenID Connect
-Implement the OAuth 2.0 Authorization Code with PKCE Flow
-What is the OAuth 2.0 Grant Type?
-OAuth 2.0 From the Command Line
-Build a Secure Node.js App with SQL Server
-As always, feel free to leave comments below. To make sure you stay up to date with our latest developer guides and tips follow us on Twitter and subscribe to our YouTube Channel!
+- https://developer.okta.com/blog/2017/06/21/what-the-heck-is-oauth
+- https://developer.okta.com/blog/2019/01/23/nobody-cares-about-oauth-or-openid-connect
+- https://developer.okta.com/blog/2019/08/22/okta-authjs-pkce
+- https://developer.okta.com/blog/2018/06/29/what-is-the-oauth2-password-grant
+- https://developer.okta.com/blog/2018/07/16/oauth-2-command-line
+- https://developer.okta.com/blog/2019/03/11/node-sql-server
