@@ -40,13 +40,15 @@ Before we dive into more details on what OAuth is doing, let’s map some of the
 You’ve just stepped through what is commonly referred to as an OAuth flow. The OAuth flow in this example is made of visible steps to grant consent, as well as some invisible steps where the two services agree on a secure way of exchanging information. The previous “Terrible Pun of the Day” example uses the most common OAuth 2.0 flow, known as the “authorization code” flow.
 
 Before we dive into more details on what OAuth is doing, let’s map some of the OAuth terminologies.
+<img width="1007" height="830" alt="image" src="https://github.com/user-attachments/assets/ef0c6ae2-01d3-4573-a1ea-0c182df4e3e4" />
 
+<img width="998" height="770" alt="image" src="https://github.com/user-attachments/assets/37355500-0fb1-4dca-857e-ceede10517e3" />
 
 Note: Sometimes the “Authorization Server” and the “Resource Server” are the same server. However, there are cases where they will not be the same server or even part of the same organization. For example, the “Authorization Server” might be a third-party service the “Resource Server” trusts.
 
 Now that we have some of the OAuth 2.0 vocabulary handy, let’s revisit the example with a closer look at what’s going on throughout the OAuth flow.
 
-Terrible Pun of the Day Authorization Code Flow
+<img width="800" height="1928" alt="image" src="https://github.com/user-attachments/assets/65bf10a6-9a8d-4932-9c4a-6ee7d5dfa060" />
 
 You, the Resource Owner, want to allow “Terrible Pun of the Day,” the Client, to access your contacts so they can send invitations to all your friends.
 The Client redirects your browser to the Authorization Server and includes with the request the Client ID, Redirect URI, Response Type, and one or more Scopes it needs.
@@ -56,10 +58,13 @@ The Authorization Server redirects back to Client using the Redirect URI along w
 The Client contacts the Authorization Server directly (does not use the Resource Owner’s browser) and securely sends its Client ID, Client Secret, and the Authorization Code.
 The Authorization Server verifies the data and responds with an Access Token.
 The Client can now use the Access Token to send requests to the Resource Server for your contacts.
-Client ID and Secret
+
+
+### Client ID and Secret
 Long before you gave “Terrible Pun of the Day” permission to access your contacts, the Client and the Authorization Server established a working relationship. The Authorization Server generated a Client ID and Client Secret, sometimes called the App ID and App Secret, and gave them to the Client to use for all future OAuth exchanges.
 
 Client receives the Client ID and Client Secret from the Authorization Server
+<img width="800" height="568" alt="image" src="https://github.com/user-attachments/assets/f4c25b72-31fe-4365-b103-155909a1681d" />
 
 As the name implies, the Client Secret must be kept secret so that only the Client and Authorization Server know what it is. This is how the Authorization Server can verify the Client.
 
@@ -67,6 +72,7 @@ That’s Not All Folks… Please Welcome OpenID Connect
 OAuth 2.0 is designed only for authorization, for granting access to data and features from one application to another. OpenID Connect (OIDC) is a thin layer that sits on top of OAuth 2.0 that adds login and profile information about the person who is logged in. Establishing a login session is often referred to as authentication, and information about the person logged in (i.e. the Resource Owner) is called identity. When an Authorization Server supports OIDC, it is sometimes called an identity provider, since it provides information about the Resource Owner back to the Client.
 
 OpenID Connect enables scenarios where one login can be used across multiple applications, also known as single sign-on (SSO). For example, an application could support SSO with social networking services such as Facebook or Twitter so that users can choose to leverage a login they already have and are comfortable using.
+<img width="800" height="840" alt="image" src="https://github.com/user-attachments/assets/d5de6f45-073e-44f9-80e8-e75ae31fb1ad" />
 
 FleaMail SSO
 
