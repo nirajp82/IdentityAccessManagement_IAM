@@ -105,8 +105,7 @@ Modern trust is established via a process called "App Registration" or "Client R
 3. **Configuring Redirect URIs (Callback URLs):** **[CRITICAL]** CyberIdentityX must explicitly register its callback URLs (e.g., `https://auth.cyberidentityx.com/oauth/callback`) inside the IdP.
 * *Security Reason:* When the IdP finishes authenticating the user, it will *only* send the authorization code back to a pre-registered URL. If a hacker intercepts the flow and tries to manipulate the request to send the code to `hacker.com`, the IdP will immediately block the transaction.
 
-
-
+![OAuth](https://github.com/user-attachments/assets/fb0447d8-10cc-4f0a-ac65-b02734cd586f)
+Reference: https://twitter.com/kamrify/status/1276994010423361540
 ---
 
-**Are you ready for me to generate `03_The_Login_Flow.md` next?** This is where we will draw out the exact step-by-step chronological flow of a user typing their email, hitting Home Realm Discovery, and the resulting Front-Channel/Back-Channel token exchanges.
