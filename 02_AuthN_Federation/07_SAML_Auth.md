@@ -6,15 +6,15 @@
 
 ## Table of Contents
 
-1. [What is SAML 2.0?](https://www.google.com/search?q=%23what-is-saml-20)
-2. [SAML Terminology](https://www.google.com/search?q=%23saml-terminology)
-3. [The SAML Login Flow (Diagram)](https://www.google.com/search?q=%23the-saml-login-flow)
-4. [Configuration](https://www.google.com/search?q=%23configuration)
-5. [Authentication Request](https://www.google.com/search?q=%23authentication-request)
-6. [Authentication Response](https://www.google.com/search?q=%23authentication-response)
-7. [Adding SAML based SSO to your app](https://www.google.com/search?q=%23adding-saml-based-sso-to-your-app)
-8. [Conclusion](https://www.google.com/search?q=%23conclusion)
-
+1. [What is SAML 2.0?](#what-is-saml-20)
+2. [SAML Terminology](#saml-terminology)
+3. [The Trust Handshake: Administrative Setup](#3-the-trust-handshake-administrative-setup)
+4. [The SAML Login Flow](#the-saml-login-flow)
+5. [Configuration](#configuration)
+6. [Authentication Request](#authentication-request)
+7. [Authentication Response](#authentication-response)
+8. [Adding SAML based SSO to your app](#adding-saml-based-sso-to-your-app)
+9. [Conclusion](#conclusion)
 ---
 
 ## What is SAML 2.0?
@@ -129,9 +129,10 @@ sequenceDiagram
     Principal->>IdP: Follows redirect to begin SAML authentication
     IdP->>Principal: Prompts for username/email, password, & 2FA
     Principal->>IdP: Submits credentials
-    IdP->>IdP: Authenticates user, packages identity into Assertions
+    IdP->>IdP: Authenticates user & signs Assertions with Private Key
     IdP->>Principal: Returns HTML form (HTTP POST Binding)
     Principal->>SP: Browser auto-posts SAMLResponse to Teleport ACS URL
+    Note over SP: Verifies signature using IdP Public Key
     SP->>SP: Validates signature and creates user session
     SP->>Principal: Grants access to application
 
@@ -139,10 +140,13 @@ sequenceDiagram
 
 **The SAML Login flow step-by-step:**
 
-1. A user clicks on "Login via Auth0" button, choosing to login via Auth0 using SAML, as opposed to using Teleport's built-in user database. Teleport redirects the user to Auth0. SAML authentication begins. We'll refer to the user as principal from now on.
-2. Auth0 asks the user for their username or email, their password and the second factor (2FA) authentication token.
-3. If the supplied information is correct, Auth0 will authenticate the user and take the principal's identity and returns it back to Teleport as *assertions*.
-4. Teleport receives the identity information from Auth0 and this allows it to create a user session.
+1. **Initiation:** A user clicks on the "Login via Auth0" button, choosing to login via Auth0 using SAML, as opposed to using Teleport's built-in user database. Teleport redirects the user to Auth0. SAML authentication begins. We'll refer to the user as the **principal** from now on.
+2. **Authentication:** Auth0 asks the user for their username or email, their password, and the second factor (2FA) authentication token.
+3. **Assertion Signing:** If the supplied information is correct, Auth0 authenticates the user and packages the principal's identity into *assertions*. **Crucially, the IdP uses its Private Key to digitally sign the SAML Response.** This ensures that the data cannot be modified without breaking the signature.
+4. **The Response:** Auth0 returns the signed identity information back to the principal's browser, which then automatically posts it to Teleport's Assertion Consumer Service (ACS) URL.
+5. **Signature Verification (Public Key Usage):** Teleport receives the identity information. **Teleport then uses the IdP Public Key (obtained during the initial setup) to verify the digital signature.** If the signature is valid, it proves the message came from the trusted IdP and has not been tampered with by a third party.
+6. **Session Creation:** Once the identity is verified, Teleport trusts the assertions and creates a user session, granting the principal access to the application.
+
 
 ---
 
