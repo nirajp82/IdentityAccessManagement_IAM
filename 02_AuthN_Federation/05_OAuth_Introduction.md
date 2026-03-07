@@ -4,11 +4,26 @@
 - OAuth 2.0 lets the Resource Owner (the User) grant a Client (PhotoApp) access to their data (requested Scopes - email,name etc.) on a Resource Server (Google's Profile API) — without ever sharing their passwords with the Client. The password is only ever given directly to the Authorization Server (Google).
 - This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
 
-* **Key Features:**
-    * Focused on authorization, not authentication methods
-    * Uses access tokens to delegate permissions
-    * Based on JSON over HTTP
-    * Designed for web, mobile, and API-based applications
+---
+
+### The Big Misconception: Two Types of "Authorization"
+
+The word **“authorization”** is used in two very different ways in IAM, which often causes confusion:
+
+* **A. OAuth Authorization (What Google Does):**
+  *“Did this user give this app (React App) permission to access their Google profile data?”*
+  OAuth doesn’t care **how** the user logged in—MFA, password, FaceID, etc.—it only ensures the Authorization Server (Google) securely verified their identity and issued a token.
+
+* **B. Application Authorization (What Your API Does):**
+  *“What can this user do inside my app?”*
+  Google does **not** manage your app’s roles or business logic. It’s entirely up to your application (.NET API) to check the user’s role (Admin, View-Only, etc.) and decide what actions they’re allowed to perform, like deleting a photo.
+
+  
+**Key Features:**
+ * Focused on authorization, not authentication methods
+ * Uses access tokens to delegate permissions
+ * Based on JSON over HTTP
+ * Designed for web, mobile, and API-based applications
 
 ### Application Stack:
 * **Frontend:** React App (Client)
@@ -105,15 +120,6 @@ Example endpoints:
 | **Client** | React App |
 | **Authorization Server** | Google |
 | **Resource Server** | Your .NET Photo API |
-
----
-
-## 4. The Big Misconception: Two Types of "Authorization"
-
-The tech industry uses the word "Authorization" to mean two completely different things in this context (IAM). This is the source of most confusion.
-
-* **A. OAuth Authorization (What Google Does):** This answers, *"Did this user give this specific application permission to access their Google account?"*
-* **B. Application Authorization (What Your API Does):** This answers, *"Is this specific user allowed to click the 'Delete Photo' button inside my app?"*
 
 ---
 
