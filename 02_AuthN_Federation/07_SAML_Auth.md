@@ -143,9 +143,44 @@ sequenceDiagram
 1. **Initiation:** A user clicks on the "Login via Auth0" button, choosing to login via Auth0 using SAML, as opposed to using Teleport's built-in user database. Teleport redirects the user to Auth0. SAML authentication begins. We'll refer to the user as the **principal** from now on.
 2. **Authentication:** Auth0 asks the user for their username or email, their password, and the second factor (2FA) authentication token.
 3. **Assertion Signing:** If the supplied information is correct, Auth0 authenticates the user and packages the principal's identity into *assertions*. **Crucially, the IdP uses its Private Key to digitally sign the SAML Response.** This ensures that the data cannot be modified without breaking the signature.
-4. **The Response:** Auth0 returns the signed identity information back to the principal's browser, which then automatically posts it to Teleport's Assertion Consumer Service (ACS) URL.
-5. **Signature Verification (Public Key Usage):** Teleport receives the identity information. **Teleport then uses the IdP Public Key (obtained during the initial setup) to verify the digital signature.** If the signature is valid, it proves the message came from the trusted IdP and has not been tampered with by a third party.
-6. **Session Creation:** Once the identity is verified, Teleport trusts the assertions and creates a user session, granting the principal access to the application.
+
+   The signing process works as follows:
+
+   a. **Prepare the Assertion XML:** The IdP generates the SAML Assertion containing the authenticated user's identity information (e.g., NameID, groups, roles).
+
+   b. **Canonicalize the XML:** The IdP normalizes the XML structure (canonicalization) so that formatting differences do not affect the signature calculation.
+
+   c. **Calculate the Hash:** The IdP computes a cryptographic hash (typically SHA256) of the canonicalized XML.
+
+```
+
+hash = SHA256(assertion_xml)
+
+```
+
+d. **Sign the Hash:** The IdP encrypts this hash using its **Private Key**, producing the digital signature.
+
+```
+
+signature = Encrypt(hash, IdP Private Key)
+
+```
+
+5. **The Response:** Auth0 returns the signed identity information back to the principal's browser, which then automatically posts it to Teleport's Assertion Consumer Service (ACS) URL.
+6. **Signature Verification (Public Key Usage):** Teleport receives the identity information. **Teleport then uses the IdP Public Key (obtained during the initial setup) to verify the digital signature.** If the signature is valid, it proves the message came from the trusted IdP and has not been tampered with by a third party.
+   The verification process works as follows:
+
+   a. **Decode the Response:** Teleport receives the `SAMLResponse` from the browser and Base64-decodes it to obtain the XML document.
+
+   b. **Locate the Signature:** Teleport extracts the `<ds:Signature>` element from the SAML Response or Assertion.
+
+   c. **Recalculate the Hash:** Teleport canonicalizes the signed XML data and computes its own hash (typically SHA256).
+
+   d. **Decrypt the Signature:** Using the **IdP Public Key**, Teleport decrypts the `SignatureValue`. This reveals the original hash that the IdP created when signing the message.
+
+   e. **Compare Hashes:**  
+   Teleport compares the **hash it calculated** with the **hash extracted from the signature**.
+7. **Session Creation:** Once the identity is verified, Teleport trusts the assertions and creates a user session, granting the principal access to the application.
 
 
 ---
