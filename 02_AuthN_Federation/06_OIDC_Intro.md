@@ -28,6 +28,8 @@ If you wanted to build a "Login with Google/Facebook/GitHub" feature using pure 
 * Facebook returned: `{"mail": "john@gmail.com", "first_name": "John"}`
 * GitHub returned: `{"login": "john", "email_address": "john@gmail.com"}`
 
+
+
 Your .NET API code would turn into a massive, tangled mess of `if/else` statements just to figure out how to extract a simple email address depending on which button the user clicked.
 
 ### 3. The Security Problem (Who is the token for?)
@@ -36,18 +38,13 @@ An Access Token is meant to be consumed by the **Resource Server** (the API), no
 
 ---
 
-### How OIDC Solved This: The ID Token
+## 4. Enter OpenID Connect (OIDC)
 
-The tech industry looked at this mess and said, *"We need a standard way to request identity data, and we need the Auth Server to hand the data directly to the app so we don't have to make extra API calls."*
-
-## OIDC
-
-OpenID Connect (OIDC) is an authentication protocol built on top of OAuth2. OIDC enables authentication of end-users against an authorization server, which verifies the user's identity and issues an ID token, usually a JSON Web Token (JWT). This ID token contains information about the user in the form of “claims.” 
-
+OpenID Connect (OIDC) is an authentication protocol built on top of OAuth2. OIDC enables authentication of end-users against an authorization server, which verifies the user's identity and issues an ID token, usually a JSON Web Token (JWT). This ID token contains information about the user in the form of “claims.”
 
 ### Clarification: Why do they say OIDC "enables authentication"?
 
- Google was **already** verifying the user's password/MFA/FaceId etc. before (authenticating them) providing AuthToken.   If Google didn't authenticate them, it wouldn't know whose data it was granting access to.
+Google was **already** verifying the user's password/MFA/FaceId etc. before (authenticating them) providing AuthToken.  If Google didn't authenticate them, it wouldn't know whose data it was granting access to.
 
 So why does the quote say OIDC "enables authentication"? It all comes down to **who is receiving the proof of that authentication**.
 
@@ -79,7 +76,12 @@ Let's look at the official quote again with this new context:
 Pure OAuth 2.0 gave you a blank key (Access Token). OIDC gives you a signed document proving exactly who turned the key (ID Token). That signed document is what "enables" your app to truly log the user in.
 
 ---
-Enter **OpenID Connect (OIDC)**. OIDC sits right on top of OAuth 2.0 and introduces a few strict rules:
+
+### How OIDC Solved This: The ID Token
+
+The tech industry looked at this mess and said, *"We need a standard way to request identity data, and we need the Auth Server to hand the data directly to the app so we don't have to make extra API calls."*
+
+OIDC sits right on top of OAuth 2.0 and introduces a few strict rules:
 
 1. **Standardized Scopes:** OIDC mandates standard scopes. You must include `scope=openid`. You can also add `profile` and `email`. Everyone agrees on these exact words.
 2. **The ID Token (The Payload):** This is the game-changer. When you use the `openid` scope, Google doesn't just give you an Access Token (the key). It also gives you an **ID Token**.
@@ -89,15 +91,9 @@ Your .NET API doesn't have to make a second trip to Google to ask for the email.
 
 **Summary:** We *could* use scopes to get identity in pure OAuth, but it required extra network requests, had zero standardization across providers, and lacked basic login security. OIDC standardized the scopes and packaged the data safely into a brand new delivery vehicle: the ID Token.
 
-Here is the continuation of your document. You can paste this directly below the text you provided to complete your second README file. It answers the question about the ID token, and then smoothly transitions into the exact flows and diagrams you need.
-
 ---
 
-*(Paste this immediately below your provided text)*
-
----
-
-### 4. Inside the OIDC "ID Token"
+### 5. Inside the OIDC "ID Token"
 
 Because the ID Token is a standardized **JSON Web Token (JWT)**, your .NET API doesn't need to call Google to read it. It simply decodes the Base64 string locally.
 
@@ -125,7 +121,7 @@ When your .NET API decodes the ID Token, the payload looks like this:
 
 ---
 
-## 5. The Flows: How We Safely Get These Tokens
+## 6. The Flows: How We Safely Get These Tokens
 
 Now we know *what* tokens we want (an Access Token and an OIDC ID Token). But how do we safely transport them from Google to your application without hackers intercepting them in the browser?
 
@@ -215,6 +211,6 @@ sequenceDiagram
 | **React only (Talking directly to APIs)** | Authorization Code Flow with PKCE | React is a "public client" and cannot hide a static Client Secret. PKCE keeps it secure. |
 | **Mobile App (iOS / Android)** | Authorization Code Flow with PKCE | Mobile apps can be decompiled to steal hardcoded secrets. PKCE is mandatory here. |
 
-*(Note: Today, PKCE is considered so secure that it is becoming the industry standard best practice to use it ALL the time, even if you have a secure .NET backend!)*
+**(Note: Today, PKCE is considered so secure that it is becoming the industry standard best practice to use it ALL the time, even if you have a secure .NET backend!)**
 
 ---
