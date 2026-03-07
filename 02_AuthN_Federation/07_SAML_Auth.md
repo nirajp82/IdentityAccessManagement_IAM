@@ -80,7 +80,38 @@ In other words, bindings define *how* the identity information about the princip
 In other words, assertions define *what* identity information about the principal is communicated from an identity provider to a service provider.
 
 ---
+## 3. The Trust Handshake: Administrative Setup
 
+Before any user can log in, the SP and IdP must perform a one-time **Metadata Exchange** to establish trust. This is a system-to-system configuration.
+
+### The Setup Workflow:
+
+1. **SP Metadata:** The SP generates a file containing its **ACS URL** (Assertion Consumer Service) and its **Public Key**.
+2. **IdP Registration:** The Admin uploads the SP metadata to the IdP so the IdP knows where to send users and how to verify requests.
+3. **IdP Metadata:** The IdP generates metadata containing its **SSO URL** and its **Public Key**.
+4. **SP Configuration:** The Admin uploads the IdP metadata to the SP. This allows the SP to verify the IdP's digital signatures.
+
+```mermaid
+sequenceDiagram
+    participant SPA as SP Administrator
+    participant IDPA as IdP Administrator
+    
+    Note over SPA, IDPA: One-Time Administrative Setup (The Handshake)
+    
+    SPA->>SPA: 1. Generate SP Metadata<br/>(ACS URL & SP Public Key)
+    SPA->>IDPA: 2. Export/Upload SP Metadata to IdP
+    
+    IDPA->>IDPA: 3. Register SP & Map User Attributes<br/>(Email, Groups, Roles)
+    
+    IDPA->>IDPA: 4. Generate IdP Metadata<br/>(SSO URL & IdP Public Key)
+    IDPA->>SPA: 5. Export/Upload IdP Metadata to SP
+    
+    SPA->>SPA: 6. Import IdP Metadata & Define RBAC<br/>(Mapping IdP Groups to App Permissions)
+    
+    Note over SPA, IDPA: Trust Established: Ready for User Authentication
+
+```
+---
 ## The SAML Login Flow
 
 To illustrate how SAML Login works, we are going to use Teleport as an example of a service provider and Auth0 for an identity provider.
