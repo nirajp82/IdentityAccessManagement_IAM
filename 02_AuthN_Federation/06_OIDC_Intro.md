@@ -13,22 +13,18 @@ Because OAuth 2.0 was designed for *authorization* (accessing APIs) and not *aut
 If you wanted to build a "Login with Google/Facebook/GitHub" feature using pure OAuth 2.0, you ran into a nightmare of inconsistencies:
 
 * **The Scope Names were different:**
-* Google used `scope=email`
-* Another provider might use `scope=mail_address`
-
+  * Google used `scope=email`
+  * Another provider might use `scope=mail_address`
 
 * **The API Endpoints were different:**
-* Google: `GET /oauth2/v3/userinfo`
-* Facebook: `GET /me`
-* GitHub: `GET /user`
-
+  * Google: `GET /oauth2/v3/userinfo`
+  * Facebook: `GET /me`
+  * GitHub: `GET /user`
 
 * **The JSON Responses were different:**
-* Google returned: `{"email": "john@gmail.com", "given_name": "John"}`
-* Facebook returned: `{"mail": "john@gmail.com", "first_name": "John"}`
-* GitHub returned: `{"login": "john", "email_address": "john@gmail.com"}`
-
-
+  * Google returned: `{"email": "john@gmail.com", "given_name": "John"}`
+  * Facebook returned: `{"mail": "john@gmail.com", "first_name": "John"}`
+  * GitHub returned: `{"login": "john", "email_address": "john@gmail.com"}`
 
 Your .NET API code would turn into a massive, tangled mess of `if/else` statements just to figure out how to extract a simple email address depending on which button the user clicked.
 
@@ -52,9 +48,9 @@ So why does the quote say OIDC "enables authentication"? It all comes down to **
 
 In pure OAuth 2.0, authentication happens, but it is a private secret between the User and Google.
 
-* Google checks the password (Authenticate the user).
-* Google says, *"Okay, I know who you are. Here is an Access Token for the React App."*
-* The React App receives the Access Token, but the token says absolutely nothing about the authentication event. The React App is basically just guessing: *"Well, Google gave me this token, so the user must have logged in."*
+  * Google checks the password (Authenticate the user).
+  * Google says, *"Okay, I know who you are. Here is an Access Token for the React App."*
+  * The React App receives the Access Token, but the token says absolutely nothing about the authentication event. The React App is basically just guessing: *"Well, Google gave me this token, so the user must have logged in."*
 
 OIDC changes the "For Whom". When the quote says "OIDC enables authentication of end-users", it implicitly means **"OIDC enables authentication of end-users FOR THE CLIENT APP."**
 
@@ -62,8 +58,8 @@ OIDC changes the "For Whom". When the quote says "OIDC enables authentication of
 
 Think of Google as a Bouncer at a nightclub, and your React App as the Bartender inside.
 
-* **Pure OAuth 2.0:** The Bouncer checks the user's ID at the door (Authentication). The Bouncer then hands the user a blank "VIP Drink Ticket" (Access Token) and sends them inside. When the user hands the ticket to the Bartender, the Bartender knows the Bouncer let them in, but the Bartender has no idea who this person actually is. The Bartender **cannot "authenticate"** the person.
-* **OpenID Connect (OIDC):** The Bouncer checks the user's ID at the door. The Bouncer hands them the "VIP Drink Ticket" (Access Token) **AND** slaps a verified Name Tag (ID Token) on their hand (shirt) that says, *"My name is John, the Bouncer verified my ID at 9:00 PM."*
+  * **Pure OAuth 2.0:** The Bouncer checks the user's ID at the door (Authentication). The Bouncer then hands the user a blank "VIP Drink Ticket" (Access Token) and sends them inside. When the user hands the ticket to the Bartender, the Bartender knows the Bouncer let them in, but the Bartender has no idea who this person actually is. The Bartender **cannot "authenticate"** the person.
+  * **OpenID Connect (OIDC):** The Bouncer checks the user's ID at the door. The Bouncer hands them the "VIP Drink Ticket" (Access Token) **AND** slaps a verified Name Tag (ID Token) on their hand (shirt) that says, *"My name is John, the Bouncer verified my ID at 9:00 PM."*
 
 Now, when John walks up to the bar, the Bartender (your app) can look at that Name Tag and say, *"Ah, I can actually authenticate who you are."*
 
@@ -83,9 +79,9 @@ The tech industry looked at this mess and said, *"We need a standard way to requ
 
 OIDC sits right on top of OAuth 2.0 and introduces a few strict rules:
 
-1. **Standardized Scopes:** OIDC mandates standard scopes. You must include `scope=openid`. You can also add `profile` and `email`. Everyone agrees on these exact words.
-2. **The ID Token (The Payload):** This is the game-changer. When you use the `openid` scope, Google doesn't just give you an Access Token (the key). It also gives you an **ID Token**.
-3. **Data is Inside the Token:** An ID Token is a JSON Web Token (JWT). It actually contains the user's data baked right into it.
+  1. **Standardized Scopes:** OIDC mandates standard scopes. You must include `scope=openid`. You can also add `profile` and `email`. Everyone agrees on these exact words.
+  2. **The ID Token (The Payload):** This is the game-changer. When you use the `openid` scope, Google doesn't just give you an Access Token (the key). It also gives you an **ID Token**.
+  3. **Data is Inside the Token:** An ID Token is a JSON Web Token (JWT). It actually contains the user's data baked right into it.
 
 Your .NET API doesn't have to make a second trip to Google to ask for the email. It just cracks open the ID Token and reads it instantly. Furthermore, because it's OIDC, the JSON inside the token looks exactly the same whether the user logged in with Google, Microsoft, or Apple.
 
@@ -114,11 +110,10 @@ When your .NET API decodes the ID Token, the payload looks like this:
 
 **Why this is perfectly secure:**
 
-* `iss` (Issuer): Proves exactly who created this token (Google).
-* `aud` (Audience): Proves this token was minted specifically for *your* Photo App, preventing the Confused Deputy attack.
-* `sub` (Subject): Google's unique, unchanging ID for this user.
-* `iat` / `exp`: Proves exactly when the user logged in and when the token expires.
-
+  * `iss` (Issuer): Proves exactly who created this token (Google).
+  * `aud` (Audience): Proves this token was minted specifically for *your* Photo App, preventing the Confused Deputy attack.
+  * `sub` (Subject): Google's unique, unchanging ID for this user.
+  * `iat` / `exp`: Proves exactly when the user logged in and when the token expires.
 ---
 
 ## 6. The Flows: How We Safely Get These Tokens
