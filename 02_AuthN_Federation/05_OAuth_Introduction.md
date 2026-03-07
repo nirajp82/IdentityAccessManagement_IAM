@@ -1,6 +1,8 @@
 # OAuth 2.0 — Clear Explanation Using a Photo App (React + .NET API)
 
-OAuth 2.0 is a widely used protocol for authorization. OAuth 2.0 lets the Resource Owner (the User) grant a Client (your PhotoApp) access to their data on a Resource Server (Google's Profile API) without ever sharing their passwords (Auth Server) with the Client. The password is only ever given directly to the Authorization Server (Google).. This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
+- OAuth 2.0 is a widely used protocol for authorization.
+- OAuth 2.0 lets the Resource Owner (the User) grant a Client (PhotoApp) access to their data (requested Scopes - email,name etc.) on a Resource Server (Google's Profile API) — without ever sharing their passwords with the Client. The password is only ever given directly to the Authorization Server (Google).
+- This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
 
 * **Key Features:**
     * Focused on authorization, not authentication methods
