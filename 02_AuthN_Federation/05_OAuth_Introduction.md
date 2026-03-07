@@ -193,5 +193,3 @@ OAuth only answers:
 It does **NOT** answer:
 
 > **"What actions can the user perform inside your Photo Application?"** (That is handled by your backend logic).
-
-```
