@@ -1,5 +1,13 @@
 # OAuth 2.0 — Clear Explanation Using a Photo App (React + .NET API)
 
+OAuth 2.0 is a widely used protocol for authorization. It lets users grant access to applications or APIs without sharing their passwords. This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
+
+- Key Features:
+    - Focused on authorization, not authentication
+    - Uses access tokens to delegate permissions
+    - Based on JSON over HTTP
+    - Designed for web, mobile, and API-based applications
+
 This explanation uses **one very specific example** so there is no ambiguity about responsibilities.
 
 Application Stack:
@@ -96,17 +104,19 @@ Google manages this.
 Your backend API manages this.
 
 ---
+## 5. What OAuth Actually Solves (and What It Doesn't)
 
-## 5. What OAuth Actually Solves
+OAuth 2.0 is a widely used protocol for **delegated authorization**. Its core purpose is to let users grant access to applications **without ever sharing their passwords**. 
 
-OAuth defines **how a client gets permission to access a resource**.
-It handles how permission is granted by the user and how a token representing that permission is issued.
+**What OAuth DOES solve:**
+* **Passwordless Delegation:** It acts as a secure middleman. The user types their password directly into Google's secure site (not your app). Google then hands your app an Access Token. Your app never sees the user's password. 
 
-OAuth does **NOT define**:
+* **Standardized Permission:** It defines exactly how that Access Token is securely issued to web, mobile, and API-based applications.
 
-* How user login works under the hood
-* How your app's internal permissions are stored
-* How APIs implement business logic/authorization
+**What OAuth does NOT solve (The "Under the Hood" Details):**
+* **Authentication methods:** It is focused on authorization, not authentication. It doesn't care *how* the user proves who they are to Google (e.g., password, fingerprint, SMS code, YubiKey). It just waits for Google to confirm the login was successful.
+* **How permissions are stored:** It doesn't know if your .NET API uses SQL, MongoDB, or what your database tables look like.
+* **How APIs implement business logic:** It has absolutely no idea what an `upload_photo` or `delete_photo` action is inside your specific app. That is entirely up to your backend.
 
 ---
 
