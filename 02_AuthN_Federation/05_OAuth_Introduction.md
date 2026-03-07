@@ -18,6 +18,8 @@ The word **“authorization”** is used in two very different ways in IAM, whic
   *“What can this user do inside my app?”*
   Google does **not** manage your app’s roles or business logic. It’s entirely up to your application (.NET API) to check the user’s role (Admin, View-Only, etc.) and decide what actions they’re allowed to perform, like deleting a photo.
 
+**🔥 The Golden Rule:**
+Whenever you hear the term "OAuth 2.0", it is referring STRICTLY to "A" (Getting permission from Google). OAuth packs its bags and goes home the moment that token is issued; it has absolutely nothing to do with "B" (what the user can do inside your app like delete photos, add photos etc).
   
 **Key Features:**
  * Focused on authorization, not authentication methods
