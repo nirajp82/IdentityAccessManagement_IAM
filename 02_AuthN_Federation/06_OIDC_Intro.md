@@ -36,7 +36,7 @@ An Access Token is meant to be consumed by the **Resource Server** (the API), no
 
 ## 4. Enter OpenID Connect (OIDC)
 
-OpenID Connect (OIDC) is an authentication protocol built on top of OAuth2. OIDC enables authentication of end-users against an authorization server, which verifies the user's identity and issues an ID token, usually a JSON Web Token (JWT). This ID token contains information about the user in the form of “claims.”
+OpenID Connect (OIDC) is an authentication protocol built on top of OAuth2. **OIDC enables authentication** of end-users against an authorization server, which verifies the user's identity and issues an ID token, usually a JSON Web Token (JWT). This ID token contains information about the user in the form of “claims.”
 
 ### Clarification: Why do they say OIDC "enables authentication"?
 
