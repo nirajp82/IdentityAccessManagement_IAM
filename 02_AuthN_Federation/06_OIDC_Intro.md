@@ -116,15 +116,45 @@ When your .NET API decodes the ID Token, the payload looks like this:
   * `iat` / `exp`: Proves exactly when the user logged in and when the token expires.
 ---
 
+
+
 ## 6. The Flows: How We Safely Get These Tokens
 
-Now we know *what* tokens we want (an Access Token and an OIDC ID Token). But how do we safely transport them from Google to your application without hackers intercepting them in the browser?
+### Day 0: The Setup & The Cryptography
+
+Before your React App or .NET API can talk to Google, two things must happen: you must register your application, and you must understand the cryptography that makes the whole system trustable.
+
+### Step 1: The Google Console Setup
+
+You must log into the Google Cloud Developer Console and register your Photo App. Google will give you two critical pieces of information:
+
+1. **Client ID:** (e.g., `photoapp123.apps.google.com`). This is your app's public identifier. You will place this in both your React frontend and your .NET backend.
+2. **Client Secret:** (e.g., `GOCSPX-abc123superSecret`). This is a highly classified password. **This must NEVER go in your React app.** It belongs exclusively in your secure .NET backend (e.g., in `appsettings.json` or Azure Key Vault).
+
+### Step 2: Understanding the Cryptography (Signatures vs. Hashes)
+
+How do we know a hacker didn't intercept the communication or forge a fake token? The system relies on two different cryptographic concepts:
+
+**A. Digital Signatures (Asymmetric Cryptography) — Used for the ID Token**
+When your .NET API receives the OIDC ID Token, it needs to prove Google actually created it.
+
+* **The Private Key:** Google has a highly secure, secret Private Key locked in their servers. When Google creates the ID Token for John Doe, it uses this Private Key to mathematically "sign" the token.
+* **The Public Key:** Google publishes a set of **Public Keys** on a public web address. Anyone can download these.
+* **The Verification:** Your .NET API downloads Google's Public Key. The math dictates that *only* the Public Key can successfully decode a signature made by the matching Private Key. If the math checks out, your API knows with 100% certainty the token is authentic and untampered.
+
+**B. Hashing (SHA-256) — Used for PKCE**
+A hash is a one-way mathematical function. If you run a word through the SHA-256 algorithm, it outputs a scrambled string. You cannot reverse the scrambled string back into the original word. We will see exactly how this protects mobile and frontend apps in Flow B below.
+
+---
+### OAuth 2.0 Flows
+
+Now that we have our `Client ID`, our `Client Secret`, and an understanding of the cryptography, how do we safely transport the tokens from Google to your application?
 
 We use **OAuth 2.0 Flows**. The flow you choose depends entirely on your architecture.
 
 ### Flow A: Authorization Code Flow (The Secure Backend Way)
 
-**When to use it:** Use this when your authentication logic lives in a secure backend (like your .NET API) that can safely hide a password (a `Client Secret`).
+**When to use it:** Use this when your authentication logic lives in a secure backend (like your .NET API) that can safely hide the static **Client Secret** you got from the Google Console.
 
 In this flow, the React app never touches the actual tokens. It only acts as a messenger to pass a temporary "Code" to the backend.
 
@@ -136,23 +166,24 @@ sequenceDiagram
     participant API as .NET API (Backend Client)
 
     User->>React: Click "Login with Google"
-    React->>Google: Redirect to Google (scope=openid email)
+    React->>Google: Redirect to Google (scope=openid email, client_id=photoapp123)
     
     Note over User,Google: User authenticates and grants permission
     Google-->>React: Redirect back to React with temporary `code=abc123`
     
     React->>API: Send `code=abc123` to backend
     
-    Note over API,Google: Backend uses its hidden Client Secret here
+    Note over API,Google: Backend uses its hidden Client Secret here!
     API->>Google: POST `code=abc123` + `Client Secret`
     Google-->>API: Returns ID Token & Access Token
     
+    API->>API: Fetch Google Public Key & Verify Digital Signature!
     API->>API: Decode ID Token (john@gmail.com). Find user in DB.
     API-->>React: Issue local PhotoApp Session Cookie/Token
 
 ```
 
-**Why we use a Code:** If Google just put the raw tokens in the browser URL, malicious browser extensions could steal them. The `code` acts as a temporary voucher that can *only* be redeemed by your backend using the secret password.
+**Why we use a Code:** If Google just put the raw tokens in the browser URL, malicious browser extensions could steal them. The `code` acts as a temporary voucher that can *only* be redeemed securely by your backend using the `Client Secret`.
 
 ---
 
@@ -162,9 +193,9 @@ sequenceDiagram
 
 **When to use it:** Use this when your Single Page Application (React) or Mobile App talks directly to Google to get the tokens.
 
-**The Problem:** Because React code runs in the user's browser, anyone can hit "View Source." You **cannot** put a `Client Secret` in React. But without a secret, if an attacker steals the temporary `code`, they can exchange it for tokens!
+**The Problem:** Because React code runs in the user's browser, anyone can hit "View Source." You **cannot** put your `Client Secret` in React. But without a secret, if an attacker steals the temporary `code`, they can exchange it for tokens!
 
-**The PKCE Solution:** PKCE creates a **dynamic, one-time secret** for every single login attempt.
+**The PKCE Solution:** PKCE creates a **dynamic, one-time secret** for every single login attempt using cryptographic hashing to replace the static Client Secret.
 
 ```mermaid
 sequenceDiagram
@@ -174,27 +205,30 @@ sequenceDiagram
     participant API as .NET API (Resource Server)
 
     User->>React: Click "Login with Google"
-    Note over React: 1. React generates `code_verifier` (the dynamic secret)<br/>2. React hashes it into `code_challenge` (the lock)
+    Note over React: 1. React generates `code_verifier` (a random string)<br/>2. React hashes it via SHA-256 into `code_challenge`
     
-    React->>Google: Redirect to Google WITH the `code_challenge`
+    React->>Google: Redirect to Google WITH the `code_challenge` (the hash)
     
     Note over User,Google: User authenticates and grants permission
     Google-->>React: Redirect back to React with temporary `code=abc123`
     
-    Note over React,Google: React exchanges code WITHOUT a static secret
-    React->>Google: POST `code=abc123` + the original `code_verifier`
+    Note over React,Google: React exchanges code WITHOUT a static Client Secret
+    React->>Google: POST `code=abc123` + the original `code_verifier` (unhashed string)
     
-    Google->>Google: Hashes the verifier. Does it match the lock? Yes!
+    Google->>Google: Hashes the verifier via SHA-256. Does it match the challenge? Yes!
     Google-->>React: Returns ID Token & Access Token directly to React
     
     Note over React,API: React now has the tokens and calls the API
     React->>API: API Call: GET /photos (Header -> Bearer: ID Token)
-    API->>API: Validate Google ID Token signature
+    
+    Note over API: API must now verify the token is real!
+    API->>API: Fetch Google Public Key & Verify Digital Signature
+    API->>API: Check internal DB roles (Can John view photos?)
     API-->>React: 200 OK (Returns Photos)
 
 ```
 
-**How the Magic Check Works:** When React sends the user to Google, it says: *"Memorize this hashed lock (`code_challenge`)."* When React later asks for the tokens, it provides the unhashed key (`code_verifier`). Google hashes the key on the spot. If it matches the lock, Google knows with 100% certainty that the exact same React app that started the login process is the one asking for the tokens.
+**How the Cryptographic Check Works:** When React sends the user to Google, it provides the `code_challenge` (the SHA-256 hashed string). When React later asks for the tokens, it provides the original, raw `code_verifier`. Google takes that raw `code_verifier` and runs it through the exact same SHA-256 algorithm on the spot. If the resulting hash perfectly matches the `code_challenge` provided in step one, Google knows with 100% certainty that the exact same React app that started the login process is the one asking for the tokens.
 
 ---
 
