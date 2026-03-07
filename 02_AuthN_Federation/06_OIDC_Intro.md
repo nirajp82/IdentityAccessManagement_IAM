@@ -209,3 +209,129 @@ sequenceDiagram
 **(Note: Today, PKCE is considered so secure that it is becoming the industry standard best practice to use it ALL the time, even if you have a secure .NET backend!)**
 
 ---
+## 7. Implementation: Validating the Token & Issuing Your App Session
+
+Once your React app (or your backend) finishes the flow, you are left holding a **Google ID Token**. You must prove it is real, and then use it to log the user into your .NET API by issuing an internal Application Token.
+
+### Step 1: Install the Google Auth Package
+
+Never try to write custom JWT validation code for Google tokens. Google provides an official package that automatically downloads their public keys and securely validates the signature.
+
+```bash
+dotnet add package Google.Apis.Auth
+dotnet add package System.IdentityModel.Tokens.Jwt
+
+```
+
+### Step 2: The .NET Auth Controller
+
+Here is the exact code where **OAuth Authorization** (Google) hands off to **Application Authorization** (Your API).
+
+```csharp
+using Google.Apis.Auth;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+
+[ApiController]
+[Route("api/auth")]
+public class AuthController : ControllerBase
+{
+    // 1. Your Client ID from Google Developer Console
+    private const string GOOGLE_CLIENT_ID = "YOUR_CLIENT_ID.apps.googleusercontent.com";
+    
+    // 2. Your internal secret for signing your OWN app tokens (Keep this safe in appsettings.json!)
+    private const string INTERNAL_API_SECRET = "super_secret_key_that_is_at_least_32_characters_long!";
+
+    [HttpPost("google-login")]
+    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)
+    {
+        try
+        {
+            // --- A. OAUTH PHASE (Validating Google's Token) ---
+            
+            var settings = new GoogleJsonWebSignature.ValidationSettings()
+            {
+                Audience = new[] { GOOGLE_CLIENT_ID } // Prevents the Confused Deputy attack!
+            };
+
+            // Cryptographically validates the signature and expiration
+            GoogleJsonWebSignature.Payload payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, settings);
+
+            // --- B. APPLICATION AUTH PHASE (Database & Internal Roles) ---
+
+            string userEmail = payload.Email;
+
+            // 1. Look up the user in YOUR database (Pseudo-code)
+            // var internalUser = _dbContext.Users.FirstOrDefault(u => u.Email == userEmail);
+            // if (internalUser == null) internalUser = CreateNewUser(userEmail);
+            
+            // Let's pretend we found the user and they are an Admin in our database
+            string internalRole = "Admin"; 
+            string internalUserId = "10";
+
+            // 2. Issue YOUR internal PhotoApp Session Token
+            string appToken = GenerateInternalJwt(internalUserId, userEmail, internalRole);
+
+            return Ok(new { 
+                Message = "Successfully authenticated!",
+                AppToken = appToken // React will save this and send it with future requests
+            });
+        }
+        catch (InvalidJwtException)
+        {
+            return Unauthorized("Invalid Google ID Token.");
+        }
+    }
+
+    private string GenerateInternalJwt(string userId, string email, string role)
+    {
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.ASCII.GetBytes(INTERNAL_API_SECRET);
+        
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, userId),
+                new Claim(ClaimTypes.Email, email),
+                new Claim(ClaimTypes.Role, role) // This is what Application Authorization uses!
+            }),
+            Expires = DateTime.UtcNow.AddHours(2), // Your app session lasts 2 hours
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+        };
+
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        return tokenHandler.WriteToken(token);
+    }
+}
+
+public class GoogleLoginRequest
+{
+    public string IdToken { get; set; }
+}
+
+```
+
+### Step 3: React Calls Your Protected API
+
+Now that React has your **Internal App Token**, it throws the Google token away. From now on, React communicates exclusively with your `.NET API` using your token.
+
+When React wants to delete a photo, it sends a request like this:
+
+```javascript
+fetch('https://api.photoapp.com/photos/1', {
+  method: 'DELETE',
+  headers: {
+    'Authorization': 'Bearer YOUR_INTERNAL_APP_TOKEN'
+  }
+});
+
+```
+
+Because your internal token contains `ClaimTypes.Role = "Admin"`, your `.NET API` can now use standard `[Authorize(Roles = "Admin")]` tags on your controllers to natively enforce your application's business logic!
+
+---
+
