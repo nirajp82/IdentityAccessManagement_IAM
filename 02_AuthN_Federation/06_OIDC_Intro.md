@@ -67,7 +67,7 @@ Now, when John walks up to the bar, the Bartender (your app) can look at that Na
 
 Let's look at the official quote again with this new context:
 
-> *"OIDC enables authentication of end-users **[by the Client App]** against an authorization server **[Google]**, which verifies the user's identity and issues an ID token... This ID token contains information about the user in the form of 'claims.'"*
+> *"OIDC enables authentication of end-users **[for the Client App]** against an authorization server **[Google]**, which verifies the user's identity and issues an ID token... This ID token contains information about the user in the form of 'claims.'"*
 
 Pure OAuth 2.0 gave you a blank key (Access Token). OIDC gives you a signed document proving exactly who turned the key (ID Token). That signed document is what "enables" your app to truly log the user in.
 
