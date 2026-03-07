@@ -40,7 +40,7 @@ OpenID Connect (OIDC) is an authentication protocol built on top of OAuth2. **OI
 
 ### Clarification: Why do they say OIDC "enables authentication"?
 
-Google was **already** verifying the user's password/MFA/FaceId etc. before (authenticating them) providing AuthToken.  If Google didn't authenticate them, it wouldn't know whose data it was granting access to.
+Google was **already** verifying  (authenticating them) the user using password/MFA/FaceId/MFA etc. before providing AuthToken.  If Google didn't authenticate them, it wouldn't know whose data it was granting access to.
 
 So why does the quote say OIDC "enables authentication"? It all comes down to **who is receiving the proof of that authentication**.
 
