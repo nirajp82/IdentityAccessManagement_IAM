@@ -1,0 +1,3 @@
+- https://web.archive.org/web/20230327071347/https://www.cloudflare.com/learning/access-management/what-is-oauth/
+- https://github.com/nirajp82/awesome-iam?tab=readme-ov-file#saml
+- https://www.okta.com/identity-101/whats-the-difference-between-oauth-openid-connect-and-saml/
