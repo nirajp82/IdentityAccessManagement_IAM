@@ -10,8 +10,6 @@
     * Based on JSON over HTTP
     * Designed for web, mobile, and API-based applications
 
-This explanation uses **one very specific example** so there is no ambiguity about responsibilities.
-
 ### Application Stack:
 * **Frontend:** React App (Client)
 * **Backend:** .NET Photo API (Resource Server)
