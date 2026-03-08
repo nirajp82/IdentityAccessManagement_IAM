@@ -283,9 +283,6 @@ We store the `code_verifier` in `sessionStorage` rather than `localStorage` beca
 **Summary:** PKCE is foolproof because the actual secret (`code_verifier`) is never sent over the network until the final, encrypted POST request to Google. By the time that happens, the temporary `code` has already been used and is invalid for any attacker.
 
 ---
-Here is the fully blended and logically ordered version. I have added a new section, **"The Attack Scenario: Why the Hacker Fails,"** complete with a specific sequence diagram and explanation showing exactly how the .NET API catches and blocks the attacker when they try to use a stolen token.
-
----
 
 ### Flow C: The OIDC Identity Layer (The Nonce Security Check)
 
