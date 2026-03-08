@@ -283,6 +283,9 @@ We store the `code_verifier` in `sessionStorage` rather than `localStorage` beca
 **Summary:** PKCE is foolproof because the actual secret (`code_verifier`) is never sent over the network until the final, encrypted POST request to Google. By the time that happens, the temporary `code` has already been used and is invalid for any attacker.
 
 ---
+Here is the fully blended and logically ordered version. I have added a new section, **"The Attack Scenario: Why the Hacker Fails,"** complete with a specific sequence diagram and explanation showing exactly how the .NET API catches and blocks the attacker when they try to use a stolen token.
+
+---
 
 ### Flow C: The OIDC Identity Layer (The Nonce Security Check)
 
@@ -325,11 +328,46 @@ sequenceDiagram
     Note over API: 1. API decodes ID Token payload<br/>2. API extracts 'nonce' claim: xyz_999
     Note over API: 3. API verifies xyz_999 matches the user's session Nonce
     
-    API-->>React: HTTP 200 OK (Identity Verified)
+    alt Nonce Matches
+        API-->>React: HTTP 200 OK (Identity Verified)
+    else Nonce Mismatch
+        API-->>React: HTTP 401 Unauthorized (Replay Attack Detected)
+    end
 
 ```
 
-#### How the Nonce Check Works:
+#### The Attack Scenario: Why the Hacker Fails
+
+Here is exactly why a Replay Attack fails when a `nonce` is implemented.
+
+```mermaid
+sequenceDiagram
+    actor Hacker
+    participant API as .NET API (Resource Server)
+
+    Note over Hacker: Hacker steals an old ID Token<br/>(Contains nonce: "old_abc")
+    
+    Hacker->>API: HTTP GET /photos (Authorization: Bearer <Stolen_ID_Token>)
+    
+    Note over API: 1. Signature is valid (It's a real Google token)<br/>2. API extracts 'nonce' claim: "old_abc"
+    Note over API: 3. API checks current session's expected Nonce: "new_xyz" (or null)
+    
+    API-->>Hacker: HTTP 401 Unauthorized (Nonce Mismatch - Blocked!)
+
+```
+
+**Why it fails:** The hacker possesses a mathematically valid token with a perfect Google signature, but they do not possess the *context* of the current session. Because the .NET API strictly checks the `nonce` inside the token against the active session's expected `nonce` (which the hacker does not know and cannot generate), the stolen token is immediately identified as a replay and discarded.
+
+#### How the Nonce Check Works (The Chain of Custody):
+
+To understand who does what, here is the exact chain of custody for the Nonce:
+
+| Step | Component | Responsibility | Technical Action |
+| --- | --- | --- | --- |
+| **1. Creation** | **React App** (Relying Party) | Create session ID. | Generates a random string and saves it in `sessionStorage`. |
+| **2. Transport** | **Browser** | Pass Nonce to Google. | Sends the nonce in the URL during the HTTP 302 Redirect. Google doesn't process it; it just "carries" it. |
+| **3. Embedding** | **Google** (OpenID Provider) | "Stitch" Nonce into token. | Places the Nonce into the JSON payload and **Digitally Signs** it. This makes the `nonce` immutable. |
+| **4. Validation** | **.NET API** (Resource Server) | Verify before access. | Compares the Nonce inside the JWT to the expected session value. |
 
 1. **Creation:** Before the user leaves your React app, you create a random string (the `nonce`). You store this string in the browser's `sessionStorage`.
 2. **The Trip:** You send the `nonce` to Google. Google doesn't do anything with it except "carry it" along.
@@ -347,7 +385,6 @@ sequenceDiagram
 * **Nonce (Flow C):** Protects the **ID Token** (The "Passport" itself).
 
 ---
----
 
 ### Summary: Which Security Layers Should I Use?
 
@@ -361,7 +398,7 @@ The choice of flow depends on your architecture, but in a modern **OIDC** enviro
 
 ---
 
-### 7. Why the "Relying Party" (React) Needs the Nonce
+### 8. Why the "Relying Party" (React) Needs the Nonce
 
 In our setup, the **React App** is the **Relying Party (RP)**.
 
@@ -388,17 +425,17 @@ When your .NET API receives the ID Token from the React App, it must perform the
 **Note:** Today, **PKCE** is considered so secure that it is becoming the industry standard best practice to use it **all the time**, even if you have a secure .NET backend. It adds a "Defense in Depth" layer that protects the Authorization Code even if your Client Secret were somehow compromised.
 
 ---
+
 ### Implementation: Generating the Nonce in React
 
+*(Note: It is highly recommended to use the browser's built-in `window.crypto` for generating security strings rather than `Math.random()`, as it provides cryptographically secure randomness).*
+
 ```javascript
-// 1. Generate a random nonce string
+// 1. Generate a cryptographically secure random nonce string
 function generateNonce() {
-    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-    let result = '';
-    for (let i = 0; i < 16; i++) {
-        result += charset.charAt(Math.floor(Math.random() * charset.length));
-    }
-    return result;
+    const array = new Uint8Array(16);
+    window.crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 // 2. Implementation in your Login Handler
@@ -409,8 +446,30 @@ async function startLogin() {
     sessionStorage.setItem('auth_nonce', nonce);
     
     // Pass it to Google in the URL
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?nonce=${nonce}&...`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?nonce=${nonce}&response_type=code&scope=openid email&client_id=YOUR_CLIENT_ID...`;
     window.location.href = authUrl;
+}
+
+```
+
+### Implementation: Verifying the Nonce in .NET (Resource Server)
+
+When your .NET API receives the token, it doesn't just check the signature; it checks the **Claims**. Here is how the Resource Server completes the Chain of Custody:
+
+```csharp
+// Inside your .NET Auth Controller
+var payload = await GoogleJsonWebSignature.ValidateAsync(idToken, settings);
+
+// 1. Digital Signature Check: Done by ValidateAsync (using Google's Public Key)
+// 2. Audience Check: Done by ValidateAsync (checks your Client ID)
+
+// 3. Nonce Check: Manually verified by the Resource Server
+string expectedNonce = GetExpectedNonceFromSession(); // Retrieve the nonce you stored earlier
+
+if (payload.Nonce != expectedNonce)
+{
+    // If the nonce in the token doesn't match your session, it's a replay attack!
+    return Unauthorized("Security violation: Nonce mismatch.");
 }
 
 ```
