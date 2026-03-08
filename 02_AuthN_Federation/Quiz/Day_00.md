@@ -2,50 +2,50 @@
 
 Test your architectural instincts. Cover the answers below and see if you can solve these real-world IAM dilemmas to separate the junior developers from the Senior Cloud Architects.
 
-## Part 1: Enterprise Single Sign-On (The Okta & Lambda Cloud Flow)
+## Part 1: Enterprise Single Sign-On (The Okta & AWS Cloud Flow)
 
-**Use Case (The Lambda Scenario):**
-An enterprise AI startup wants their 50 researchers to log into the Lambda Cloud using their existing corporate Okta credentials so they don't have to manage separate passwords.
+**Use Case (The AWS Scenario):**
+An enterprise AI startup wants their 50 researchers to log into the AWS Cloud using their existing corporate Okta credentials so they don't have to manage separate passwords.
 
-**The Setup:** Instead of forcing 50 researchers to create 50 new passwords for Lambda Cloud, the startup configures Lambda to "trust" their Okta directory.
+**The Setup:** Instead of forcing 50 researchers to create 50 new passwords for AWS Cloud, the startup configures AWS to "trust" their Okta directory.
 
 * **Resource Owner:** The AI Researcher.
-* **Client (Relying Party):** Lambda Cloud (The app the researcher is trying to access).
+* **Client (Relying Party):** AWS Cloud (The app the researcher is trying to access).
 * **Authorization Server (Identity Provider):** Okta (The source of truth for employee identity).
 
 **Why this is brilliant for Enterprise Security:**
 
 1. **Zero Password Fatigue:** The researchers only ever remember one password (Okta).
-2. **Instant Offboarding:** If a researcher quits, the IT admin disables their Okta account. Instantly, that researcher is locked out of Lambda Cloud, GitHub, Slack, and every other tool. Lambda Cloud doesn't need to be notified; the next time the researcher tries to log in, Okta simply refuses to issue the token.
+2. **Instant Offboarding:** If a researcher quits, the IT admin disables their Okta account. Instantly, that researcher is locked out of AWS Cloud, GitHub, Slack, and every other tool. AWS Cloud doesn't need to be notified; the next time the researcher tries to log in, Okta simply refuses to issue the token.
 
 **The Flow (OIDC Authorization Code Flow):**
-Because Lambda Cloud needs to know *who* logged in to provision the correct computing workspace, this heavily relies on the **ID Token** provided by the OIDC layer.
+Because AWS Cloud needs to know *who* logged in to provision the correct computing workspace, this heavily relies on the **ID Token** provided by the OIDC layer.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Researcher as AI Researcher
-    participant Lambda as Lambda Cloud (Client)
+    participant AWS as AWS Cloud (Client)
     participant Okta as Okta (Identity Provider)
 
-    Researcher->>Lambda: 1. Goes to lambdalabs.com and enters corporate email
-    Lambda->>Lambda: Recognizes corporate domain (@aistartup.com)
-    Lambda->>Researcher: Redirects browser to Okta
+    Researcher->>AWS: 1. Goes to AWSlabs.com and enters corporate email
+    AWS->>AWS: Recognizes corporate domain (@aistartup.com)
+    AWS->>Researcher: Redirects browser to Okta
     
     Researcher->>Okta: 2. GET /authorize (scope=openid email profile)
     Okta-->>Researcher: Prompts for Corporate Login & MFA
     Researcher->>Okta: 3. Authenticates successfully
     
-    Okta->>Researcher: Redirects browser back to Lambda Cloud
-    Researcher->>Lambda: 4. GET /callback?code=abc123
+    Okta->>Researcher: Redirects browser back to AWS Cloud
+    Researcher->>AWS: 4. GET /callback?code=abc123
     
-    Lambda->>Okta: 5. POST /token (Trades Code + Client Secret for Tokens)
-    Okta-->>Lambda: 6. Returns ID Token (OIDC) & Access Token
+    AWS->>Okta: 5. POST /token (Trades Code + Client Secret for Tokens)
+    Okta-->>AWS: 6. Returns ID Token (OIDC) & Access Token
     
-    Note over Lambda: 7. Lambda opens the ID Token:<br/>{ "sub": "emp_001", "email": "researcher@aistartup.com" }
+    Note over AWS: 7. AWS opens the ID Token:<br/>{ "sub": "emp_001", "email": "researcher@aistartup.com" }
     
-    Lambda->>Lambda: 8. Finds or creates workspace for researcher@aistartup.com
-    Lambda-->>Researcher: 9. Logs user into the Lambda Cloud Dashboard
+    AWS->>AWS: 8. Finds or creates workspace for researcher@aistartup.com
+    AWS-->>Researcher: 9. Logs user into the AWS Cloud Dashboard
 
 ```
 
