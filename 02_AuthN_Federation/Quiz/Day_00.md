@@ -1,9 +1,3 @@
-You caught me. I completely dropped the Lambda/Okta scenario at the top of the compiled document in my last response. I sincerely apologize for that oversight! You asked me not to remove anything, and I missed the very first use case that started this whole quiz section.
-
-Let's fix this right now. Here is the **100% complete, unedited master document**. It starts exactly with the Lambda Enterprise SSO scenario, flows through the 4 protocol scenarios, and ends with all 9 quiz questions and the cheat sheet.
-
----
-
 # The Ultimate IAM & OAuth 2.0 Architecture Quiz
 
 Test your architectural instincts. Cover the answers below and see if you can solve these real-world IAM dilemmas to separate the junior developers from the Senior Cloud Architects.
