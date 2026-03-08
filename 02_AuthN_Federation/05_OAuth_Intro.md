@@ -154,18 +154,17 @@ These permissions are stored in **your database** (e.g., in a `Users`, `Photos`,
 ### Tokens
 
 * **Access Token:** The “Valet Key.” A credential used by the Client application to securely access the Resource Server.
-* **Purpose (Authorization, Not Authentication):** Represents *delegated authorization*. It communicates exactly *what* the client is allowed to do, but it is **not** intended to prove *who* the user is.
-* **Format Agnostic:** OAuth 2.0 does not define the structure of an Access Token. It may be an opaque string or a structured JSON Web Token (JWT).
-* **The Identity Trap (Architectural Warning):** In modern enterprise systems, Access Tokens are commonly JWTs and include a subject identifier (`sub`). However, **Resource Servers must treat Access Tokens strictly as authorization artifacts and must never use them as proof of user authentication.**
-* **Strict Validation Rules:** An API must validate `iss` (Trusted issuer?), `aud` (Meant for this API?), `exp` (Still valid?), and `scope` (Has required permissions?).
-
+   * **Purpose (Authorization, Not Authentication):** Represents *delegated authorization*. It communicates exactly *what* the client is allowed to do, but it is **not** intended to prove *who* the user is.
+   * **Format Agnostic:** OAuth 2.0 does not define the structure of an Access Token. It may be an opaque string or a structured JSON Web Token (JWT).
+   * **The Identity Trap (Architectural Warning):** In modern enterprise systems, Access Tokens are commonly JWTs and include a subject identifier (`sub`). However, **Resource Servers must treat Access Tokens strictly as authorization artifacts and must never use them as proof of user authentication.**
+   * **Strict Validation Rules:** An API must validate `iss` (Trusted issuer?), `aud` (Meant for this API?), `exp` (Still valid?), and `scope` (Has required permissions?).
 
 * **Refresh Token:** A long-lived credential used by the Client to obtain new Access Tokens when they expire. *(Problem solved: Allows Access Tokens to remain short-lived for security while avoiding frequent user reauthentication).*
 * **ID Token (OIDC Extension):** A JWT that contains verified user identity information (subject, name, email). *(Problem solved: OAuth 2.0 handles authorization, while OpenID Connect adds authentication).*
 
 ### Scopes and Claims
 
-* **Scopes:** Defined at the OAuth 2.0 level. They represent the *permissions* the client is requesting (e.g., `profile:read`).
+* **Scopes:** Defined at the OAuth 2.0 level. They represent the *permissions* the client is requesting (e.g., `email`).
 * **Claims:** Key-value pairs inside a token asserting facts (e.g., `sub` for user ID).
 
 ### JWT Structure and Validation (The Local Math)
