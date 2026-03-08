@@ -260,6 +260,90 @@ async function handleLoginClick() {
     window.location.href = googleAuthUrl;
 }
 ```
+---
+### Flow C: The OIDC Identity Layer (The Nonce Security Check)
+
+**When to use it:** This flow is not a separate choice from Flow B, but rather an **added security layer** within OpenID Connect (OIDC). It is mandatory when your application acts as a **Relying Party** to prevent "Replay Attacks."
+
+**The Problem:** An ID Token is like a digital passport. If a hacker intercepts a valid ID Token (for example, through a man-in-the-middle attack or by stealing it from a log file), they could try to "replay" that token to your .NET API to log in as that user, even though they never actually performed the login themselves.
+
+**The Nonce Solution:** The Nonce (Number used ONCE) acts as a cryptographic "handshake" that binds your specific browser session to the specific ID Token issued by Google.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant React as React App (Relying Party)
+    participant Google as Google (OpenID Provider)
+    participant API as .NET API (Resource Server)
+
+    User->>React: Click "Login with Google"
+    Note over React: 1. React generates a random, long string (Nonce)
+    Note over React: 2. React saves Nonce in sessionStorage
+    
+    React->>Google: HTTP 302 Redirect (with scope=openid & nonce=xyz_999)
+    
+    Note over User,Google: User enters credentials at Google
+    Google->>Google: Authenticates user & copies nonce:xyz_999 into ID Token claims
+    
+    Google-->>React: HTTP 302 Redirect (with code=abc123)
+    
+    React->>Google: HTTP POST /token (Exchange code for tokens)
+    Google-->>React: HTTP 200 OK (Returns ID Token with nonce:xyz_999 inside)
+    
+    React->>API: HTTP GET /photos (Authorization: Bearer <ID_Token>)
+    
+    Note over API: 1. API decodes ID Token payload<br/>2. API extracts 'nonce' claim: xyz_999
+    Note over API: 3. API verifies xyz_999 matches the user's session Nonce
+    
+    API-->>React: HTTP 200 OK (Identity Verified)
+
+```
+
+#### How the Nonce Check Works:
+
+1. **Creation:** Before the user leaves your React app, you create a random string (the `nonce`). You store this string in the browser's `sessionStorage`.
+2. **The Trip:** You send the `nonce` to Google. Google doesn't do anything with it except "carry it" along.
+3. **The Embedding:** When Google creates your ID Token, it places your `nonce` inside the JSON payload. Crucially, Google then **Digitally Signs** the token. This makes the `nonce` immutable—it cannot be changed by anyone.
+4. **The Validation:** When the ID Token reaches your .NET API, the API compares the `nonce` inside the token to the `nonce` you generated at the start. If they match, it proves this token was created *specifically* for this current login session and isn't a "replay" of an old token from an hour ago.
+
+#### Why no one can access the Nonce?
+
+* **Browser Isolation:** The `nonce` is stored in `sessionStorage`. Because of the **Same-Origin Policy**, a hacker's website in another tab is physically blocked by the browser from reading your app's `sessionStorage`.
+* **Signature Integrity:** Even if a hacker sees the `nonce` in the ID Token, they cannot modify it. If they tried to change the `nonce` inside the token to match their own session, the **Digital Signature** would break, and your .NET API would reject the token as "Tampered."
+
+**Summary of Security Layers:**
+
+* **PKCE (Flow B):** Protects the **Code** (The "Voucher" for the token).
+* **Nonce (Flow C):** Protects the **ID Token** (The "Passport" itself).
+
+---
+
+### Implementation: Generating the Nonce in React
+
+```javascript
+// 1. Generate a random nonce string
+function generateNonce() {
+    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    let result = '';
+    for (let i = 0; i < 16; i++) {
+        result += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    return result;
+}
+
+// 2. Implementation in your Login Handler
+async function startLogin() {
+    const nonce = generateNonce();
+    
+    // Store in session storage so we can check it later
+    sessionStorage.setItem('auth_nonce', nonce);
+    
+    // Pass it to Google in the URL
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?nonce=${nonce}&...`;
+    window.location.href = authUrl;
+}
+
+```
 
 #### 2. The Cryptographic Math (The One-Way Street)
 
