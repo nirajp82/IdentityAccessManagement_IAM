@@ -22,6 +22,12 @@ Think of the Access Token as a **Valet Key** for a car. The valet key allows the
 * This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
 
 ---
+### Why is it called an "Authorization" Framework?
+
+- In OAuth 2.0, the word **authorization** refers to the act of delegation.
+- It is called an authorization framework because the **User (Resource Owner)** is explicitly *authorizing* the **Client (React App)** to access the User's own profile data hosted by Google.
+- When a user clicks "Login with Google", the framework simply provides a secure mechanism for the User to say to Google: *"I authorize this React App to read my profile data on my behalf."* Because the core action is the user granting permission, OAuth 2.0 is strictly an authorization protocol, not an authentication protocol.
+---
 
 ## 2. The Big Misconception: Two Types of "Authorization"
 
@@ -80,19 +86,14 @@ To build a scalable IAM system, you must strictly define the boundaries of the p
 ### Roles
 
 * **Resource Owner:** The entity capable of granting access to a protected resource (e.g., Alice, the user).
-* **Dual Responsibilities of the Resource Owner:** For OAuth 2.0 to function securely, the Resource Owner performs two distinct actions during the authorization flow:
-* **Authentication:** Proves *who they are* to the Authorization Server (logging in with password and MFA). The Client application never sees user credentials.
-* **Consent (Delegation):** Explicitly grants permission (Scopes) to the Client application (clicking **Allow**).
+    * **Dual Responsibilities of the Resource Owner:** For OAuth 2.0 to function securely, the Resource Owner performs two distinct actions during the authorization flow:
+    * **Authentication:** Proves *who they are* to the Authorization Server (logging in with password and MFA). The Client application never sees user credentials.
+    * **Consent (Delegation):** Explicitly grants permission (Scopes) to the Client application (clicking **Allow**).
 
-
-* **Types of Resource Owners (PhotoApp Context):**
-* **Human Consumer (External):** Alice wants to use PhotoApp. She is the Resource Owner of her Google profile. She authenticates at `accounts.google.com` and consents to delegate `profile:read` access to PhotoApp.
-* **Human Employee (Internal):** Bob, a PhotoApp Moderator. He logs into the internal **Admin Portal**. Bob is the Resource Owner of his *own corporate identity and session*. He authorizes the Admin Portal to call the internal .NET APIs on his behalf.
-* **Non-Human Entity (Machine-to-Machine):** A background Thumbnail Generator Microservice. In the **Client Credentials Flow**, no human is present. The microservice *acts as the Resource Owner* of its own data and authenticates itself to the Auth Server to obtain a token.
-
-
-
-
+    * **Types of Resource Owners (PhotoApp Context):**
+        * **Human Consumer (External):** Alice wants to use PhotoApp. She is the Resource Owner of her Google profile. She authenticates at `accounts.google.com` and consents to delegate `profile:read` access to PhotoApp.
+        * **Human Employee (Internal):** Bob, a PhotoApp Moderator. He logs into the internal **Admin Portal**. Bob is the Resource Owner of his *own corporate identity and session*. He authorizes the Admin Portal to call the internal .NET APIs on his behalf.
+        * **Non-Human Entity (Machine-to-Machine):** A background Thumbnail Generator Microservice. In the **Client Credentials Flow**, no human is present. The microservice *acts as the Resource Owner* of its own data and authenticates itself to the Auth Server to obtain a token.
 * **Client:** The application making requests on behalf of the Resource Owner (e.g., React App).
 * **Authorization Server (IAM):** The server that authenticates the user, obtains consent, and issues tokens (e.g., Google).
 * **Resource Server:** The API hosting the protected data (e.g., .NET Photo API).
