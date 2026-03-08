@@ -1,4 +1,19 @@
-# OAuth 2.0 — Clear Explanation Using a Photo App (React + .NET API)
+# The Comprehensive Bible: OAuth 2.0 Architecture & Implementation
+
+## 1. Introduction: The Problem OAuth 2.0 Solves
+
+Before modern Identity and Access Management (IAM), the internet suffered from the **Password Anti-Pattern**.
+
+Imagine it is 2010. A user wants a third-party application, "BudgetApp", to track their expenses from their bank, "MoneyGuard". To do this, BudgetApp asks the user: *"Please enter your MoneyGuard username and password here."* BudgetApp then logs into the bank pretending to be the user.
+
+**The critical problems with this approach:**
+
+* **Over-privileged Access:** The user only wanted BudgetApp to *read* transactions. But with the password, BudgetApp can also *wire money*.
+* **No Revocation:** The only way to stop BudgetApp is for the user to change their bank password, which breaks every other integration they have.
+* **Massive Blast Radius:** If BudgetApp's database is breached, hackers gain the plaintext passwords to thousands of bank accounts.
+
+**The Solution: OAuth 2.0 and Delegated Access**
+OAuth 2.0 (RFC 6749) was created to solve this. It is a **Delegated Authorization Framework**. Instead of sharing passwords, the user is redirected to the bank. The bank asks the user: *"Do you want to grant BudgetApp permission to READ your transactions?"* If the user agrees, the bank issues BudgetApp an **Access Token**.
 
 - OAuth 2.0 is a widely used protocol for authorization.
 - OAuth 2.0 lets the Resource Owner (the User) grant a Client (PhotoApp) access to their data (requested Scopes - email,name etc.) on a Resource Server (Google's Profile API) — without ever sharing their passwords with the Client. The password is only ever given directly to the Authorization Server (Google).
