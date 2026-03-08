@@ -247,11 +247,11 @@ This is the full flow step-by-step, including the exact HTTP payloads sent betwe
 sequenceDiagram
     autonumber
     participant Alice as Alice (Browser)
-    participant React as PhotoApp (React / .NET Backend)
-    participant Google as accounts.google.com
-    participant API as api.photoapp.com (.NET API)
+    participant React as PhotoApp Backend
+    participant Google as accounts.google.com (Auth Server)
+    participant GoogleAPI as Google Profile API (Resource Server)
 
-    Alice->>React: 1. Clicks "Login with Google"
+    Alice->>React: 1. Clicks "Connect Google Profile"
     React->>React: Generates PKCE Secret & Hash
     React->>Alice: Redirects browser to Google
     Alice->>Google: 2. GET /authorize (Sends PKCE Hash)
@@ -261,11 +261,14 @@ sequenceDiagram
     Alice->>React: 4. GET /callback?code=123 (Delivers Code)
     React->>Google: 5. POST /token (Sends Code + PKCE Secret)
     Google->>Google: Verifies PKCE Secret matches Hash
-    Google-->>React: 6. Returns Access Token & ID Token
-    React->>React: 7. Identify user, issue Internal Session Token
-    React->>API: 8. GET /photos + Internal Bearer Token
-    API->>API: Verifies JWT Signature Locally & Roles
-    API-->>React: 9. Returns Protected Data
+    
+    %% THE DIFFERENCE IS HERE: Only Access Token is returned
+    Google-->>React: 6. Returns Access Token (No ID Token)
+    
+    %% THE API CALL IS TO GOOGLE, NOT .NET
+    React->>GoogleAPI: 7. GET /v1/profile + Bearer Access Token
+    GoogleAPI->>GoogleAPI: Verifies Token
+    GoogleAPI-->>React: 8. Returns Profile Data
 
 ```
 
