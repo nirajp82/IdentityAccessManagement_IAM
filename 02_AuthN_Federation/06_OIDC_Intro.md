@@ -307,7 +307,7 @@ sequenceDiagram
     participant API as .NET API (Resource Server)
 
     User->>React: Click "Login with Google"
-    Note over React: 1. React generates a random, long string (Nonce)
+    Note over React: 1. React generates a random, long string (Nonce: xyz_999)
     Note over React: 2. React saves Nonce in sessionStorage
     
     React->>Google: HTTP 302 Redirect (with scope=openid & nonce=xyz_999)
@@ -320,17 +320,17 @@ sequenceDiagram
     React->>Google: HTTP POST /token (Exchange code for tokens)
     Google-->>React: HTTP 200 OK (Returns ID Token with nonce:xyz_999 inside)
     
-    React->>API: HTTP GET /photos (Authorization: Bearer <ID_Token>)
+    Note over React: React pulls expected Nonce ("xyz_999") from sessionStorage
+    React->>API: HTTP POST /api/auth/login <br/>(Body contains: ID_Token AND clientNonce: "xyz_999")
     
-    Note over API: 1. API decodes ID Token payload<br/>2. API extracts 'nonce' claim: xyz_999
-    Note over API: 3. API verifies xyz_999 matches the user's session Nonce
+    Note over API: 1. API decodes ID Token payload<br/>2. API extracts 'nonce' claim from token ("xyz_999")
+    Note over API: 3. API compares Token Nonce with the clientNonce provided in the request body
     
     alt Nonce Matches
-        API-->>React: HTTP 200 OK (Identity Verified)
+        API-->>React: HTTP 200 OK (Identity Verified, issues App Session)
     else Nonce Mismatch
         API-->>React: HTTP 401 Unauthorized (Replay Attack Detected)
     end
-
 ```
 
 #### The Attack Scenario: Why the Hacker Fails
@@ -342,14 +342,18 @@ sequenceDiagram
     actor Hacker
     participant API as .NET API (Resource Server)
 
-    Note over Hacker: Hacker steals an old ID Token<br/>(Contains nonce: "old_abc")
+    Note over Hacker: 1. Hacker steals an old ID Token<br/>(Google sealed nonce "old_abc" inside it)
+    Note over Hacker: 2. Hacker writes a script to attack the API.<br/>They don't know the original nonce, so they fake a new one ("new_xyz").
     
-    Hacker->>API: HTTP GET /photos (Authorization: Bearer <Stolen_ID_Token>)
+    Hacker->>API: HTTP POST /api/auth/login <br/>(Body: ID_Token + clientNonce: "new_xyz")
     
-    Note over API: 1. Signature is valid (It's a real Google token)<br/>2. API extracts 'nonce' claim: "old_abc"
-    Note over API: 3. API checks current session's expected Nonce: "new_xyz" (or null)
+    Note over API: 1. API checks Token Signature (Valid - it's a real Google token)
+    Note over API: 2. API opens Token and extracts the baked-in 'nonce': "old_abc"
+    Note over API: 3. API reads the POST body and extracts the provided 'clientNonce': "new_xyz"
     
-    API-->>Hacker: HTTP 401 Unauthorized (Nonce Mismatch - Blocked!)
+    Note over API: 4. API compares them: "old_abc" DOES NOT EQUAL "new_xyz"
+    
+    API-->>Hacker: HTTP 401 Unauthorized (Replay Attack Detected - Blocked!)
 
 ```
 
