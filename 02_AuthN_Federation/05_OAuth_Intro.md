@@ -22,12 +22,6 @@ Think of the Access Token as a **Valet Key** for a car. The valet key allows the
 * This is the core of how apps like Twitter or Spotify let users sign in with Google or Facebook.
 
 ---
-### Why is it called an "Authorization" Framework?
-
-- In OAuth 2.0, the word **authorization** refers to the act of delegation.
-- It is called an authorization framework because the **User (Resource Owner)** is explicitly *authorizing* the **Client (React App)** to access the User's own profile data hosted by Google.
-- When a user clicks "Login with Google", the framework simply provides a secure mechanism for the User to say to Google: *"I authorize this React App to read my profile data on my behalf."* Because the core action is the user granting permission, OAuth 2.0 is strictly an authorization protocol, not an authentication protocol.
----
 
 ## 2. The Big Misconception: Two Types of "Authorization"
 
@@ -43,6 +37,13 @@ Google does **not** manage your app’s roles or business logic. It’s entirely
 **🔥 The Golden Rule:**
 Whenever you hear the term "OAuth 2.0", it is referring STRICTLY to "A" (Getting permission from Google). OAuth packs its bags and goes home the moment that token is issued; it has absolutely nothing to do with "B" (what the user can do inside your app like delete photos, add photos etc).
 
+### Why is it called an "Authorization" Framework?
+
+- In OAuth 2.0, the word **authorization** refers to the act of delegation.
+- It is called an authorization framework because the **User (Resource Owner)** is explicitly *authorizing* the **Client (React App)** to access the User's own profile data hosted by Google.
+- When a user clicks "Login with Google", the framework simply provides a secure mechanism for the User to say to Google: *"I authorize this React App to read my profile data on my behalf."* Because the core action is the user granting permission, OAuth 2.0 is strictly an authorization protocol, not an authentication protocol.
+
+---
 **Key Features:**
 
 * Focused on authorization, not authentication methods.
@@ -87,8 +88,8 @@ To build a scalable IAM system, you must strictly define the boundaries of the p
 
 * **Resource Owner:** The entity capable of granting access to a protected resource (e.g., Alice, the user).
     * **Dual Responsibilities of the Resource Owner:** For OAuth 2.0 to function securely, the Resource Owner performs two distinct actions during the authorization flow:
-    * **Authentication:** Proves *who they are* to the Authorization Server (logging in with password and MFA). The Client application never sees user credentials.
-    * **Consent (Delegation):** Explicitly grants permission (Scopes) to the Client application (clicking **Allow**).
+       * **Authentication:** Proves *who they are* to the Authorization Server (logging in with password and MFA). The Client application never sees user credentials.
+       * **Consent (Delegation):** Explicitly grants permission (Scopes) to the Client application (clicking **Allow**).
 
     * **Types of Resource Owners (PhotoApp Context):**
         * **Human Consumer (External):** Alice wants to use PhotoApp. She is the Resource Owner of her Google profile. She authenticates at `accounts.google.com` and consents to delegate `profile:read` access to PhotoApp.
