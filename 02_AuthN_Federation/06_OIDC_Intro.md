@@ -230,6 +230,58 @@ sequenceDiagram
 
 **How the Cryptographic Check Works:** When React sends the user to Google, it provides the `code_challenge` (the SHA-256 hashed string). When React later asks for the tokens, it provides the original, raw `code_verifier`. Google takes that raw `code_verifier` and runs it through the exact same SHA-256 algorithm on the spot. If the resulting hash perfectly matches the `code_challenge` provided in step one, Google knows with 100% certainty that the exact same React app that started the login process is the one asking for the tokens.
 
+### How the PKCE Security Trap Works
+
+To understand exactly why this prevents hackers from stealing your tokens, we have to look at how PKCE combines unbreakable math with local device security.
+
+#### 1. The Device-Level Security (The Local Vault)
+
+When your React or Mobile app generates the raw `code_verifier`, it stores it in the device's isolated local memory.
+
+* **In Mobile Apps (iOS/Android):** Operating systems enforce **App Sandboxing**. Even if a user accidentally installed a malicious app on their phone, that evil app is physically blocked by the OS from looking into your Photo App's memory to steal the `code_verifier`.
+* **In React Apps (Browsers):** Browsers enforce the **Same-Origin Policy**. The `code_verifier` is held in memory or `sessionStorage` that is strictly tied to `yourphotoapp.com`. A malicious website open in another tab cannot peek across the browser to read it.
+
+	- Implementation: Generating & Storing Secrets in React
+
+You do not need an external library for this; modern browsers have built-in **Web Cryptography**. Here is how to generate the secret, create the hash, and lock the secret in isolated storage.
+
+```javascript
+ Execution: Run this before redirecting to Google
+async function handleLoginClick() {
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    // B. Lock the raw secret inside isolated Session Storage
+    // Malicious scripts in other tabs CANNOT read this.
+    sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+
+    // C. Send the user to Google, passing ONLY the hashed challenge
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=...&code_challenge=${codeChallenge}&code_challenge_method=S256`;
+    window.location.href = googleAuthUrl;
+}
+```
+
+#### 2. The Cryptographic Math (The One-Way Street)
+
+The entire PKCE flow relies on one unbreakable rule of cryptography: **SHA-256 is a one-way street.** You can turn a `code_verifier` into a `code_challenge` hash in a millisecond, but all the supercomputers on Earth cannot reverse that hash back into the original text.
+
+#### 3. The Attack Scenario: Why the Hacker Fails
+
+Imagine a malicious network sniffer or a rogue browser extension is spying on the user's internet traffic.
+
+1. **The Setup:** Your app generates a secret `"my_secret_123"`, locks it securely in local memory, hashes it to `"x8f9...q2p"`, and sends the user to Google.
+2. **The Interception:** The user logs in, and Google redirects them back to your app with the temporary code in the URL (`code=abc123`). The hacker's network sniffer intercepts this URL and steals the code.
+3. **The Trap:** The hacker races to Google's server and says, *"Hey Google! I stole `code=abc123`! Give me the Access Token!"*
+4. **The Block:** Google says, *"Okay, I have a hash waiting for that code. Hand over the raw `code_verifier` so I can hash it and see if it matches."* 5.  **Game Over:** Because the hacker only intercepted network traffic, they only ever saw the mathematically irreversible **hash** (`code_challenge`). Because of App Sandboxing and Browser Isolation, they cannot reach into the user's physical device to steal the **raw** `code_verifier`. The math fails, Google rejects the request, and the hacker gets nothing.
+
+---
+
+#### Why `sessionStorage`?
+
+We store the `code_verifier` in `sessionStorage` rather than `localStorage` because `sessionStorage` is strictly sandboxed to the specific browser tab. If the user closes the tab, the memory is wiped. This ensures the secret is never persisted on disk and remains inaccessible to any other origin or process.
+
+**Summary:** PKCE is foolproof because the actual secret (`code_verifier`) is never sent over the network until the final, encrypted POST request to Google. By the time that happens, the temporary `code` has already been used and is invalid for any attacker.
+
 ---
 
 ### Summary: Which Flow Should I Choose?
