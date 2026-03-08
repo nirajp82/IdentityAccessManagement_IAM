@@ -260,7 +260,30 @@ async function handleLoginClick() {
     window.location.href = googleAuthUrl;
 }
 ```
+
+#### 2. The Cryptographic Math (The One-Way Street)
+
+The entire PKCE flow relies on one unbreakable rule of cryptography: **SHA-256 is a one-way street.** You can turn a `code_verifier` into a `code_challenge` hash in a millisecond, but all the supercomputers on Earth cannot reverse that hash back into the original text.
+
+#### 3. The Attack Scenario: Why the Hacker Fails
+
+Imagine a malicious network sniffer or a rogue browser extension is spying on the user's internet traffic.
+
+1. **The Setup:** Your app generates a secret `"my_secret_123"`, locks it securely in local memory, hashes it to `"x8f9...q2p"`, and sends the user to Google.
+2. **The Interception:** The user logs in, and Google redirects them back to your app with the temporary code in the URL (`code=abc123`). The hacker's network sniffer intercepts this URL and steals the code.
+3. **The Trap:** The hacker races to Google's server and says, *"Hey Google! I stole `code=abc123`! Give me the Access Token!"*
+4. **The Block:** Google says, *"Okay, I have a hash waiting for that code. Hand over the raw `code_verifier` so I can hash it and see if it matches."* 5.  **Game Over:** Because the hacker only intercepted network traffic, they only ever saw the mathematically irreversible **hash** (`code_challenge`). Because of App Sandboxing and Browser Isolation, they cannot reach into the user's physical device to steal the **raw** `code_verifier`. The math fails, Google rejects the request, and the hacker gets nothing.
+
 ---
+
+#### Why `sessionStorage`?
+
+We store the `code_verifier` in `sessionStorage` rather than `localStorage` because `sessionStorage` is strictly sandboxed to the specific browser tab. If the user closes the tab, the memory is wiped. This ensures the secret is never persisted on disk and remains inaccessible to any other origin or process.
+
+**Summary:** PKCE is foolproof because the actual secret (`code_verifier`) is never sent over the network until the final, encrypted POST request to Google. By the time that happens, the temporary `code` has already been used and is invalid for any attacker.
+
+---
+
 ### Flow C: The OIDC Identity Layer (The Nonce Security Check)
 
 **When to use it:** This flow is not a separate choice from Flow B, but rather an **added security layer** within OpenID Connect (OIDC). It is mandatory when your application acts as a **Relying Party** (React App) to prevent "Replay Attacks."
@@ -324,7 +347,47 @@ sequenceDiagram
 * **Nonce (Flow C):** Protects the **ID Token** (The "Passport" itself).
 
 ---
+---
 
+### Summary: Which Security Layers Should I Use?
+
+The choice of flow depends on your architecture, but in a modern **OIDC** environment, you are usually layering these together.
+
+| Architecture Setup | Recommended Flow | Security Layers | Why? |
+| --- | --- | --- | --- |
+| **React + .NET API (Backend handles Auth)** | **Authorization Code Flow** | Client Secret + Nonce | The .NET API is a "Confidential Client"; it can safely hide a static **Client Secret** to prove its identity to Google. |
+| **React only (SPA talking to APIs)** | **Auth Code Flow + PKCE** | PKCE + Nonce | React is a "Public Client." It cannot hide a secret. **PKCE** secures the code exchange, and **Nonce** secures the user's identity. |
+| **Mobile App (iOS / Android)** | **Auth Code Flow + PKCE** | PKCE + Nonce | Mobile apps can be decompiled. **PKCE** is mandatory to prevent code interception on the device. |
+
+---
+
+### 7. Why the "Relying Party" (React) Needs the Nonce
+
+In our setup, the **React App** is the **Relying Party (RP)**.
+
+* **Definition:** It is called a "Relying Party" because it **relies** on an external Identity Provider (Google) to tell it who the user is.
+* **The Risk:** Without a **Nonce**, the Relying Party is vulnerable to a **Replay Attack**. An attacker could steal an old, valid ID Token and "replay" it to your .NET API. Because the token has a valid Digital Signature from Google, your API would trust it and log the attacker in.
+
+#### How the Nonce Prevents the Attack:
+
+1. **Generation:** The Relying Party (React) generates a unique `nonce` string and stores it in **SessionStorage**.
+2. **Binding:** Google receives this `nonce` and "bakes" it into the ID Token.
+3. **Validation:** When the ID Token arrives at your .NET API, the API extracts the `nonce` and ensures it matches the original value from that specific user's session.
+4. **Result:** If a hacker tries to "replay" an old token, the `nonce` inside that stolen token will not match the current session's `nonce`. Your API will see the mismatch and reject the login.
+
+---
+
+### 8. Final Security Checklist for your .NET API
+
+When your .NET API receives the ID Token from the React App, it must perform these three checks to be 100% secure:
+
+1. **Signature Check:** Use the **Public Key** from Google to verify the **Digital Signature**. (Proves Google sent it).
+2. **Audience Check (`aud`):** Ensure the Client ID in the token matches your app's Client ID. (Proves it was meant for *your* app).
+3. **Nonce Check (`nonce`):** Ensure the nonce in the token matches the nonce generated by your React App. (Proves it's not a replay of an old session).
+
+**Note:** Today, **PKCE** is considered so secure that it is becoming the industry standard best practice to use it **all the time**, even if you have a secure .NET backend. It adds a "Defense in Depth" layer that protects the Authorization Code even if your Client Secret were somehow compromised.
+
+---
 ### Implementation: Generating the Nonce in React
 
 ```javascript
@@ -351,42 +414,8 @@ async function startLogin() {
 }
 
 ```
-
-#### 2. The Cryptographic Math (The One-Way Street)
-
-The entire PKCE flow relies on one unbreakable rule of cryptography: **SHA-256 is a one-way street.** You can turn a `code_verifier` into a `code_challenge` hash in a millisecond, but all the supercomputers on Earth cannot reverse that hash back into the original text.
-
-#### 3. The Attack Scenario: Why the Hacker Fails
-
-Imagine a malicious network sniffer or a rogue browser extension is spying on the user's internet traffic.
-
-1. **The Setup:** Your app generates a secret `"my_secret_123"`, locks it securely in local memory, hashes it to `"x8f9...q2p"`, and sends the user to Google.
-2. **The Interception:** The user logs in, and Google redirects them back to your app with the temporary code in the URL (`code=abc123`). The hacker's network sniffer intercepts this URL and steals the code.
-3. **The Trap:** The hacker races to Google's server and says, *"Hey Google! I stole `code=abc123`! Give me the Access Token!"*
-4. **The Block:** Google says, *"Okay, I have a hash waiting for that code. Hand over the raw `code_verifier` so I can hash it and see if it matches."* 5.  **Game Over:** Because the hacker only intercepted network traffic, they only ever saw the mathematically irreversible **hash** (`code_challenge`). Because of App Sandboxing and Browser Isolation, they cannot reach into the user's physical device to steal the **raw** `code_verifier`. The math fails, Google rejects the request, and the hacker gets nothing.
-
 ---
-
-#### Why `sessionStorage`?
-
-We store the `code_verifier` in `sessionStorage` rather than `localStorage` because `sessionStorage` is strictly sandboxed to the specific browser tab. If the user closes the tab, the memory is wiped. This ensures the secret is never persisted on disk and remains inaccessible to any other origin or process.
-
-**Summary:** PKCE is foolproof because the actual secret (`code_verifier`) is never sent over the network until the final, encrypted POST request to Google. By the time that happens, the temporary `code` has already been used and is invalid for any attacker.
-
----
-
-### Summary: Which Flow Should I Choose?
-
-| Architecture Setup | Recommended Flow | Why? |
-| --- | --- | --- |
-| **React + .NET API (Backend handles Auth)** | Authorization Code Flow | The .NET API can safely store the Google Client Secret in its environment variables. |
-| **React only (Talking directly to APIs)** | Authorization Code Flow with PKCE | React is a "public client" and cannot hide a static Client Secret. PKCE keeps it secure. |
-| **Mobile App (iOS / Android)** | Authorization Code Flow with PKCE | Mobile apps can be decompiled to steal hardcoded secrets. PKCE is mandatory here. |
-
-**(Note: Today, PKCE is considered so secure that it is becoming the industry standard best practice to use it ALL the time, even if you have a secure .NET backend!)**
-
----
-## 7. Implementation: Validating the Token & Issuing Your App Session
+## 9. Implementation: Validating the Token & Issuing Your App Session
 
 Once your React app (or your backend) finishes the flow, you are left holding a **Google ID Token**. You must prove it is real, and then use it to log the user into your .NET API by issuing an internal Application Token.
 
