@@ -178,16 +178,15 @@ A JSON Web Token (JWT) consists of three Base64-URL encoded parts: `Header.Paylo
 **How the JWT signature is used (Step-by-Step without database calls):**
 
 * **Phase 1: The Auth Server "Signs" the Token**
-   * Google creates the JWT Header and Payload.
-   * **The Hash:** Google runs that plaintext through a SHA-256 algorithm to create a unique string (**HashX**).
-   * **The Signature:** Google takes **HashX** and encrypts it using its tightly guarded **Private Key**. This is attached to the token.
+	* Google creates the plaintext JWT Header and Payload.
+	* **The Hash:** Google runs that plaintext through a SHA-256 algorithm to create a unique string (let's call it **Hash A**).
+	* **The Signature:** Google encrypts **Hash A** using its tightly guarded **Private Key**. This encrypted hash becomes the Signature attached to the back of the token.
 
 * **Phase 2: The API Gateway "Verifies" the Token**
-   * Your .NET API receives the JWT. It downloads Google's **Public Key**.
-   * **Step A (The Gateway's Hash):** The .NET API runs the plaintext Header and Payload through SHA-256 itself to create **Hash A**.
-   * **Step B (The Decryption):** The .NET API applies Google's **Public Key** to the encrypted Signature. Because it was encrypted with the Private Key, the Public Key decrypts it, revealing Google's original hash (**Hash B**).
-   * **Step C (The Final Check):** The API asks: **Does Hash A exactly equal Hash B?** If yes, the token is perfectly intact and genuinely issued by Google.
-
+	* Your .NET API receives the JWT. It downloads Google's **Public Key**.
+	* **Step 1 (The Gateway's Hash):** The .NET API takes the plaintext Header and Payload from the token and runs them through SHA-256 itself to create its own hash (**Hash B**).
+	* **Step 2 (The Decryption):** The .NET API applies Google's **Public Key** to the encrypted Signature. Because it was encrypted with the Private Key, the Public Key successfully decrypts it, revealing Google's original hash (**Hash A**).
+	* **Step 3 (The Final Check):** The API asks: **Does Hash B exactly equal Hash A?** If yes, the token is perfectly intact and genuinely issued by Google.
 
 > #### **The Golden Rule: Signatures vs. Encryption**
 > 
