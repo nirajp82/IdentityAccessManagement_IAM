@@ -263,7 +263,14 @@ async function handleLoginClick() {
 ---
 ### Flow C: The OIDC Identity Layer (The Nonce Security Check)
 
-**When to use it:** This flow is not a separate choice from Flow B, but rather an **added security layer** within OpenID Connect (OIDC). It is mandatory when your application acts as a **Relying Party** to prevent "Replay Attacks."
+**When to use it:** This flow is not a separate choice from Flow B, but rather an **added security layer** within OpenID Connect (OIDC). It is mandatory when your application acts as a **Relying Party** (React App) to prevent "Replay Attacks."
+
+#### What is a Relying Party (RP)?
+
+In our stack, the **React App** is the **Relying Party**.
+
+* **Why the name?** Because your application is **relying** on a third party (Google) to verify that the user is who they say they are.
+* **The Relationship:** Google is the **OpenID Provider (OP)**. It "provides" the identity. Your React App "relies" on that identity to log the user into your system.
 
 **The Problem:** An ID Token is like a digital passport. If a hacker intercepts a valid ID Token (for example, through a man-in-the-middle attack or by stealing it from a log file), they could try to "replay" that token to your .NET API to log in as that user, even though they never actually performed the login themselves.
 
