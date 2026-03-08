@@ -363,12 +363,25 @@ sequenceDiagram
 
 To understand who does what, here is the exact chain of custody for the Nonce:
 
-| Step | Component | Responsibility | Technical Action |
-| --- | --- | --- | --- |
-| **1. Creation** | **React App** (Relying Party) | Create session ID. | Generates a random string and saves it in `sessionStorage`. |
-| **2. Transport** | **Browser** | Pass Nonce to Google. | Sends the nonce in the URL during the HTTP 302 Redirect. Google doesn't process it; it just "carries" it. |
-| **3. Embedding** | **Google** (OpenID Provider) | "Stitch" Nonce into token. | Places the Nonce into the JSON payload and **Digitally Signs** it. This makes the `nonce` immutable. |
-| **4. Validation** | **.NET API** (Resource Server) | Verify before access. | Compares the Nonce inside the JWT to the expected session value. |
+#### How the Nonce Check Works (The Detailed Chain of Custody)
+
+In the Authorization Code Flow, the Nonce survives a multi-step journey. Google has to temporarily "memorize" your Nonce while it hands out the temporary Authorization Code, and only bakes it into the final ID Token at the very end.
+
+| Phase | Component | Action | Where is the Nonce? | Where is the Auth Code / Token? |
+| --- | --- | --- | --- | --- |
+| **1. Creation** | **React App** | Generates the Nonce. | Saved safely in React's `sessionStorage`. | *Not created yet.* |
+| **2. The First Trip (Redirect)** | **Browser** | Sends user to Google to log in. | Sent in the URL to Google (`&nonce=xyz_999`). | *Not created yet.* |
+| **3. Auth Code Generation** | **Google** | User logs in. Google generates a temporary "voucher". | Google securely memorizes `"xyz_999"` on its server, tied to this login attempt. | Google generates the **Authorization Code** (`code=abc123`) and redirects back to React. |
+| **4. The Second Trip (Exchange)** | **React App** | React receives the Code and silently POSTs it back to Google. | Still sitting safely in React's `sessionStorage`. | React sends the **Authorization Code** to Google's `/token` endpoint. |
+| **5. ID Token Generation** | **Google** | Google validates the Code and creates the final tokens. | Google retrieves the memorized `"xyz_999"` and permanently embeds it into the JSON payload. | Google generates the **ID Token**, Digitally Signs it, and sends it to React. |
+| **6. API Handoff** | **React App** | React calls your .NET backend to log in. | React pulls `"xyz_999"` from `sessionStorage` and puts it in the POST body (`clientNonce`). | React puts the **ID Token** in the POST body alongside the `clientNonce`. |
+| **7. Validation** | **.NET API** | Verifies the identity before granting access. | .NET compares the `nonce` inside the token to the `clientNonce` in the POST body. | The **ID Token's** Digital Signature is cryptographically verified using Google's Public Key. |
+
+### The "Aha!" Moment:
+
+The most important thing to notice here is **Phase 3**.
+
+The temporary **Authorization Code** does *not* contain the Nonce. The Code is just a random string (like a coat check ticket). When React trades that ticket in during **Phase 4**, Google looks up the coat check number, remembers the Nonce you sent in Phase 2, and finally stitches it into the newly minted **ID Token** in **Phase 5**.
 
 1. **Creation:** Before the user leaves your React app, you create a random string (the `nonce`). You store this string in the browser's `sessionStorage`.
 2. **The Trip:** You send the `nonce` to Google. Google doesn't do anything with it except "carry it" along.
