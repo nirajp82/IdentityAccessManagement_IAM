@@ -228,7 +228,9 @@ sequenceDiagram
 
 ```
 
-**How the Cryptographic Check Works:** When React sends the user to Google, it provides the `code_challenge` (the SHA-256 hashed string). When React later asks for the tokens, it provides the original, raw `code_verifier`. Google takes that raw `code_verifier` and runs it through the exact same SHA-256 algorithm on the spot. If the resulting hash perfectly matches the `code_challenge` provided in step one, Google knows with 100% certainty that the exact same React app that started the login process is the one asking for the tokens.
+**How the Cryptographic Check Works:** When React sends the user to Google, it provides the `code_challenge` (the SHA-256 hashed string). When React later asks for the tokens, it provides the original, raw `code_verifier`.
+
+*(Crucially, React and Google **do not share a secret key** to do this. SHA-256 is a universal, keyless mathematical formula. The raw `code_verifier` itself acts as the one-time password.)* Google takes that raw `code_verifier` and runs it through the exact same universal SHA-256 algorithm on the spot. If the resulting hash perfectly matches the `code_challenge` provided in step one, Google knows with 100% certainty that the exact same React app that started the login process is the one asking for the tokens.
 
 ### How the PKCE Security Trap Works
 
