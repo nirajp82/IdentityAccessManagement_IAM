@@ -199,6 +199,260 @@ public class BackupWorkerService
 *(Note for .NET Developers: For large enterprise applications, it is highly recommended to use the `IdentityModel` NuGet package. It automatically handles token caching, expiration checks, and JSON parsing behind the scenes, reducing the token generation logic to just a few lines of code.)*
 
 
+### The Advanced Architect's Upgrade: Securing Machine-to-Machine
+
+While standard `client_credentials` solves the Basic Auth problem, it still relies on a static `client_secret`. If a developer accidentally commits that secret to GitHub, a hacker can generate tokens forever.
+
+To achieve Zero-Trust security, Senior Architects remove the static password entirely. Instead, they use **Private Key JWT (RFC 7523)** or **Mutual TLS (mTLS)**.
+
+---
+
+### Upgrade Level 1: Private Key JWT (Client Assertions)
+
+Instead of sending a password, the backend server uses **Asymmetric Cryptography (Public/Private Keys)** to prove its identity dynamically. This is the enterprise gold standard used by Microsoft Entra ID and highly secure financial APIs.
+
+**How the Cryptographic Math Works:**
+
+1. **The Setup:** You generate a Private/Public Key pair. You give the Public Key to the Auth Server. You lock the Private Key deep inside your .NET Server's hardware (like Azure Key Vault).
+2. **The Dynamic Secret:** When the script wakes up, it does NOT send a password. Instead, it creates a tiny, temporary JSON Web Token (JWT) locally. It stamps it with the current time (valid for only 1 minute) and **signs it using its Private Key**.
+3. **The Trade:** It sends this signed JWT (a "Client Assertion") to the Auth Server.
+4. **The Verification:** The Auth Server uses the Public Key it has on file to verify the signature. If the math checks out, it knows 100% that the request came from your exact server.
+
+#### 1. The Private Key JWT Flow (Application Layer Security)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as .NET Worker (Service Account)
+    participant Auth as .NET Auth Server (App Layer)
+
+    Note over Client: Wakes up at 2:00 AM
+    
+    Client->>Client: Creates a JWT valid for 60 seconds.
+    Client->>Client: Signs JWT using its hidden Private Key.
+    
+    Note over Client,Auth: The HTTP Connection is made
+    Client->>Auth: POST /token 
+    Note over Client,Auth: grant_type=client_credentials<br/>& client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer<br/>& client_assertion=<The_Signed_JWT>
+    
+    Note over Auth: 1. Auth Server fetches the Client's Public Key<br/>2. Verifies the digital signature (Math Check)<br/>3. Verifies the timestamp isn't expired
+    
+    Auth-->>Client: Returns temporary Access Token
+
+```
+
+#### .NET Implementation: The Client (Worker Service)
+
+Here is how the .NET worker generates the signed assertion and requests the token.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+
+public async Task<string> GetTokenWithPrivateKeyAsync()
+{
+    string clientId = "photoapp_backup_service_123";
+    string tokenEndpoint = "https://auth.yourcompany.com/oauth/token";
+
+    // 1. Load your Private Key (In reality, fetch this securely from Azure Key Vault)
+    using var rsa = RSA.Create();
+    rsa.ImportRSAPrivateKey(Convert.FromBase64String("YOUR_BASE64_PRIVATE_KEY"), out _);
+    var securityKey = new RsaSecurityKey(rsa);
+    var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
+
+    // 2. Create the Client Assertion (A temporary JWT)
+    var tokenDescriptor = new SecurityTokenDescriptor
+    {
+        Issuer = clientId,
+        Audience = tokenEndpoint, // Must be the exact URL of the Auth Server
+        Subject = new ClaimsIdentity(new[] { new Claim("sub", clientId) }),
+        Expires = DateTime.UtcNow.AddMinutes(1), // Self-destructs in 60 seconds!
+        SigningCredentials = credentials
+    };
+
+    var tokenHandler = new JwtSecurityTokenHandler();
+    var signedAssertion = tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
+
+    // 3. Send the Assertion instead of a client_secret
+    var formData = new Dictionary<string, string>
+    {
+        { "grant_type", "client_credentials" },
+        { "client_id", clientId },
+        { "client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" },
+        { "client_assertion", signedAssertion }, // The dynamic cryptographic proof
+        { "scope", "logs:read" }
+    };
+
+    var requestBody = new FormUrlEncodedContent(formData);
+    var response = await _httpClient.PostAsync(tokenEndpoint, requestBody);
+    
+    // Parse response and return Access Token...
+    var jsonString = await response.Content.ReadAsStringAsync();
+    return jsonString; // Extract access_token here
+}
+
+```
+
+#### .NET Implementation: The Auth Server
+
+Here is exactly how an ASP.NET Core Auth Server validates that incoming assertion using the Public Key.
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
+
+[ApiController]
+[Route("oauth")]
+public class TokenController : ControllerBase
+{
+    [HttpPost("token")]
+    public IActionResult GenerateToken([FromForm] string grant_type, [FromForm] string client_id, [FromForm] string client_assertion)
+    {
+        if (grant_type != "client_credentials") return BadRequest("Unsupported grant type");
+
+        // 1. Fetch the Public Key for this specific client from your database
+        string publicKeyBase64 = _db.GetPublicKeyForClient(client_id);
+        
+        using var rsa = RSA.Create();
+        rsa.ImportRSAPublicKey(Convert.FromBase64String(publicKeyBase64), out _);
+        var clientPublicKey = new RsaSecurityKey(rsa);
+
+        // 2. Mathematically validate the incoming Client Assertion
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var validationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = client_id, // The client must claim to be themselves
+            ValidateAudience = true,
+            ValidAudience = "https://auth.yourcompany.com/oauth/token", // Must be meant for us
+            IssuerSigningKey = clientPublicKey, // Test the digital signature!
+            ValidateLifetime = true, // Ensure it hasn't expired (the 60-second window)
+            ClockSkew = TimeSpan.Zero
+        };
+
+        try
+        {
+            // If this line doesn't throw an exception, the math is perfect. 
+            // The client truly holds the private key.
+            var principal = tokenHandler.ValidateToken(client_assertion, validationParameters, out var validatedToken);
+            
+            // 3. Issue the actual Access Token for the Resource Server
+            string accessToken = GenerateResourceAccessToken(client_id, "logs:read");
+            return Ok(new { access_token = accessToken, token_type = "Bearer", expires_in = 900 });
+        }
+        catch (SecurityTokenException)
+        {
+            return Unauthorized("Invalid client assertion signature or expired token.");
+        }
+    }
+}
+
+```
+
+---
+
+### Upgrade Level 2: Mutual TLS (mTLS)
+
+While Private Key JWT handles security at the *Application Layer* (HTTP), **Mutual TLS (mTLS) - RFC 8705** handles it at the *Transport Layer* (TCP/IP).
+
+In standard HTTPS, the Client verifies the Server's certificate to ensure it isn't talking to an imposter. In **Mutual** TLS, the Server *also* demands to see the Client's certificate before it even allows the HTTP request to begin.
+
+**Why it's the ultimate protection:**
+If mTLS is enforced, a hacker could literally steal your Access Token, your Private Key, and your Client ID, but they *still* couldn't make an API call. Why? Because the hacker's physical computer does not have the X.509 Certificate installed in its operating system. The Auth Server's Web Server (Kestrel/Nginx) will instantly drop the TCP connection before your .NET application code even boots up.
+
+#### 2. The Mutual TLS (mTLS) Flow (Transport Layer Security)
+
+Notice in this diagram how the connection is challenged and verified by the OS/Web Server *before* the POST request is ever allowed to happen.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as .NET Worker (Has Client Cert)
+    participant OS as Web Server (Kestrel / Nginx)
+    participant Auth as .NET Auth App (Token Endpoint)
+
+    Note over Client, OS: Phase 1: Transport Layer Security (TCP/TLS Handshake)
+    Client->>OS: Initiate connection (Client Hello)
+    OS-->>Client: Server Hello & Requests Client Certificate
+    Client->>OS: Provides X.509 Client Certificate
+    OS->>OS: Validates Certificate (Thumbprint, Issuing CA, Expiry)
+    
+    alt Certificate Invalid or Missing
+        OS-->>Client: Connection Dropped (TCP Reset - 403 Forbidden)
+    else Certificate Valid
+        Note over Client, Auth: Phase 2: Application Layer (HTTP)
+        Client->>Auth: POST /token (grant_type=client_credentials & client_id=123)
+        Auth->>Auth: App confirms validated cert exists in HttpContext
+        Auth-->>Client: Returns Access Token (Bound to the Certificate)
+    end
+
+```
+
+#### .NET Implementation: The Auth Server (mTLS Setup)
+
+To implement this in an ASP.NET Core Auth Server, you configure Kestrel (the web server) to demand client certificates, and then add the certificate authentication middleware so your application code can double-check the certificate.
+
+```csharp
+// Program.cs (.NET Auth Server setup for mTLS)
+using Microsoft.AspNetCore.Authentication.Certificate;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
+using System.Security.Cryptography.X509Certificates;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Configure Kestrel (The Web Server) to demand a certificate at the Transport Layer
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ConfigureHttpsDefaults(httpsOptions =>
+    {
+        // Require the client to present a certificate during the TLS handshake
+        httpsOptions.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+    });
+});
+
+// 2. Configure the Application Layer to validate the presented certificate
+builder.Services.AddAuthentication(CertificateAuthenticationDefaults.AuthenticationScheme)
+    .AddCertificate(options =>
+    {
+        options.Events = new CertificateAuthenticationEvents
+        {
+            OnCertificateValidated = context =>
+            {
+                // Extract the Thumbprint of the certificate the client provided
+                var clientThumbprint = context.ClientCertificate.Thumbprint;
+                
+                // Check if this specific certificate thumbprint is registered to a valid client in our DB
+                if (_db.IsValidClientCertificate(clientThumbprint))
+                {
+                    context.Success();
+                }
+                else
+                {
+                    context.Fail("Unknown Client Certificate.");
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
+app.Run();
+
+```
+
+By combining **Private Key JWT** for application-level cryptographic proof and **mTLS** for network-level physical machine verification, you achieve the highest tier of API security possible (often mandated by Open Banking (PSD2) and government defense networks).
 ---
 
 **Scenario 2: The Corporate Workday Login (Enterprise SSO)**
