@@ -457,7 +457,6 @@ By combining **Private Key JWT** for application-level cryptographic proof and *
 
 ---
 
-
 **Scenario 2: The Corporate Workday Login (Enterprise SSO)**
 
 **The Setup:** A Fortune 500 hospital uses Microsoft Entra ID (Azure AD) to manage its 10,000 employees. The hospital buys "Workday" for HR. When a nurse goes to `workday.com/hospital` and types their email, Workday redirects their browser to Entra ID. The nurse logs in with MFA. Entra ID then generates a massive, cryptographically signed **XML Document** containing the nurse's department and employee ID, and forces the nurse's browser to HTTP POST that XML document back to Workday. Workday reads the XML and logs the nurse in.
@@ -684,6 +683,104 @@ sequenceDiagram
 **Phase 3: Identity Verification & App Session (Steps 8-9)**
 8. The .NET Backend receives the ID Token. It downloads Apple's Public Key to verify the digital signature (ensuring a hacker didn't spoof the token). Once the math passes, it opens the JSON payload, reads `user@icloud.com`, and either creates a new user in the Fitness SQL database or finds their existing profile.
 9. Finally, the .NET Backend generates its *own* internal session token (or sets an `HttpOnly` cookie) and hands it down to the mobile app. The user is officially logged into the Fitness App!
+
+---
+---
+
+**Scenario 5: The Modern Web App (The Holy Trinity: PKCE, State, and Nonce)**
+
+**The Setup:** A fintech startup builds a web dashboard ("MoneyApp") using a React frontend and a .NET Backend API. Because it's a financial app, they use Auth0 as their strict Identity Provider. When a user clicks "Log In", the system must guarantee three things:
+
+1. A hacker didn't trick the user's browser into logging in as someone else.
+2. A malicious browser extension didn't steal the authorization code.
+3. A hacker didn't intercept an old ID Token and try to replay it today.
+
+To solve this, the .NET Backend generates three distinct cryptographic strings before the user is ever redirected to Auth0.
+
+* **The Protocol:** **OIDC + OAuth 2.0 (Authorization Code Flow with PKCE)**
+* **The Verdict:** The absolute gold standard for modern Web and Mobile applications. By combining State, PKCE, and Nonce, you eliminate the three most common interception and forgery attacks in federated identity.
+
+### The Architect's Note: The "Holy Trinity" of OIDC Security
+
+Before looking at the diagram, you must understand the distinct job of each parameter.
+
+#### 1. The `state` Parameter (Defeats CSRF Forgery)
+
+* **The Attack:** Cross-Site Request Forgery (CSRF). A hacker logs into MoneyApp as themselves, pauses the flow, copies the callback URL containing *their* Auth Code, and tricks Alice into clicking it. MoneyApp finishes the login using the hacker's code, permanently linking Alice's bank data to the hacker's account.
+* **The Fix:** Before redirecting Alice to Auth0, the backend generates a random `state` string (e.g., `xyz123`) and saves it in a secure cookie on Alice's browser. It sends `state=xyz123` to Auth0. When Auth0 redirects back, it includes `state=xyz123`. The backend checks if the URL matches Alice's cookie. If the hacker tries to inject their own code, their `state` won't match Alice's cookie, and the connection is blocked.
+
+#### 2. The `PKCE` Parameter (Defeats Code Interception)
+
+* **The Attack:** A malicious browser extension intercepts the callback URL and steals the Authorization Code. It races to the backend to trade the code for an Access Token.
+* **The Fix:** The "Coat Check PIN" analogy. The backend generates a random secret (the `code_verifier`), hashes it, and sends the hash (the `code_challenge`) to Auth0. When the code is traded later, the backend must provide the raw, unscrambled `code_verifier`. The malicious extension might steal the code, but it doesn't have the raw verifier stored in the backend's memory, so Auth0 rejects the hacker's trade.
+
+#### 3. The `nonce` Parameter (Defeats ID Token Replay)
+
+* **The Attack:** A hacker intercepts the final OIDC ID Token (the JWT). Two weeks later, they try to inject that same ID Token into the backend to trick the app into thinking the user just logged in.
+* **The Fix:** The "Freshness Seal." The backend generates a random `nonce` (Number Used Once) and sends it to Auth0. Auth0 physically bakes this `nonce` string into the digital signature of the ID Token JWT. When the backend receives the JWT, it cracks it open and says, *"Does the nonce inside this token perfectly match the nonce I generated 30 seconds ago?"* If yes, the token is fresh. If the hacker replays an old token, the nonces won't match, and the login fails.
+
+---
+
+### How it Works: The Ultimate Secure Flow
+
+This diagram shows the Backend-For-Frontend (BFF) pattern where the React app relies on the .NET API to handle the cryptographic heavy lifting.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant React as React (Browser)
+    participant BFF as .NET BFF (Backend)
+    participant Auth0 as Auth0 (Identity Provider)
+
+    React->>BFF: 1. User clicks "Login"
+    
+    Note over BFF: Generates State, Nonce, & PKCE Verifier
+    BFF->>BFF: Hashes PKCE Verifier -> PKCE Challenge
+    BFF->>React: Sets State & Nonce in secure encrypted cookies
+    
+    React->>Auth0: 2. Redirects to Auth0<br/>(state=A1, nonce=B2, code_challenge=C3)
+    
+    Auth0-->>React: Prompts for Credentials & MFA
+    React->>Auth0: 3. Authenticates successfully
+    
+    Auth0->>React: 4. Redirects back to React/BFF<br/>(?code=AuthCode_99 & state=A1)
+    
+    Note over BFF: Phase 2: The Security Verifications
+    BFF->>BFF: 5. Verifies URL `state` matches Browser Cookie `state`
+    
+    BFF->>Auth0: 6. POST /token (code=AuthCode_99, code_verifier=Raw_C3)
+    Auth0->>Auth0: 7. PKCE Check: Hashes Raw_C3. Does it match Challenge C3?
+    
+    Auth0-->>BFF: 8. Returns ID Token & Access Token
+    
+    BFF->>BFF: 9. Verifies JWT Signature. Extracts `nonce` from ID Token.
+    BFF->>BFF: 10. Verifies Token `nonce` matches Browser Cookie `nonce`
+    
+    BFF-->>React: 11. Success! Issues secure HttpOnly Session Cookie.
+
+```
+
+### Step-by-Step Breakdown
+
+**Phase 1: The Setup (Steps 1-2)**
+
+1. The user clicks Login. The React app calls the .NET backend. The backend generates three random strings: the `state`, the `nonce`, and the PKCE `code_verifier`. It stores these temporarily in an encrypted cookie on the user's browser. It hashes the PKCE string to create the `code_challenge`.
+2. The browser is redirected to Auth0, carrying the `state`, `nonce`, and `code_challenge` in the URL.
+
+**Phase 2: The Callback & State Check (Steps 3-5)**
+3. The user authenticates at Auth0.
+4. Auth0 redirects the browser back to the app with the Authorization Code and the `state`.
+5. **Security Check 1 (CSRF):** The .NET backend looks at the `state` in the URL and compares it to the `state` in the browser cookie. If they match, it proves this exact browser session initiated the request.
+
+**Phase 3: The Exchange & PKCE Check (Steps 6-8)**
+6. The .NET backend opens a secure back-channel to Auth0 to trade the code. It sends the raw PKCE `code_verifier` it generated in Step 1.
+7. **Security Check 2 (Interception):** Auth0 hashes the raw `code_verifier` and checks if it matches the `code_challenge` from Step 2. If it does, Auth0 knows the code wasn't stolen by a middleman.
+8. Auth0 returns the tokens. Because this is OIDC, it physically embeds the original `nonce` inside the ID Token JWT.
+
+**Phase 4: The ID Token & Nonce Check (Steps 9-11)**
+9. The .NET backend validates the ID Token's digital signature.
+10. **Security Check 3 (Replay):** The backend reads the `nonce` inside the token and checks if it matches the `nonce` cookie from Step 1. If it matches, the backend knows this token was freshly minted for this specific login attempt, and not an old token stolen by a hacker.
+11. The backend establishes a secure session (usually via an `HttpOnly` cookie) for the React app to use.
 
 ---
 
