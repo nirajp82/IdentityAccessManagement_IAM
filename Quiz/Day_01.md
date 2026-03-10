@@ -59,8 +59,8 @@ sequenceDiagram
 **The Protocol:** **Basic Authentication**
 ### The Problem: Why Basic Authentication is Bad (The "Master Key" Problem)
     
-    - Base64 is *encoding*, not encryption, so anyone intercepting the network traffic can instantly decode the password. It should only ever be used over strict HTTPS.
-    - In legacy Basic Authentication, a script is given a standard `username` and `password`. Every single time the script wants to pull data from an API, it glues them together, encodes them into a Base64 string, and attaches that string to the HTTP request header.
+* Base64 is *encoding*, not encryption, so anyone intercepting the network traffic can instantly decode the password. It should only ever be used over strict HTTPS.
+* In legacy Basic Authentication, a script is given a standard `username` and `password`. Every single time the script wants to pull data from an API, it glues them together, encodes them into a Base64 string, and attaches that string to the HTTP request header.
 
 **The Architectural Flaws of Basic Auth:**
 
