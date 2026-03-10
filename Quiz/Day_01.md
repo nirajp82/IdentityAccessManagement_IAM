@@ -736,72 +736,101 @@ This diagram shows the Backend-For-Frontend (BFF) pattern where the React app re
 ```mermaid
 sequenceDiagram
     autonumber
-    participant React as React (Browser)
-    participant BFF as .NET BFF (Backend)
-    participant Auth0 as Auth0 (Identity Provider)
+    participant React as React SPA (Browser)
+    participant BFF as .NET API (BFF)
+    participant Auth0 as Auth0 (IdP)
 
-    React->>BFF: 1. User clicks "Login"
+    Note over React, Auth0: Phase 1: The Secure Setup & Redirect
+    React->>BFF: User clicks "Login"
     
-    Note over BFF: Generates State, Nonce, & PKCE Verifier
-    BFF->>BFF: Hashes PKCE Verifier -> PKCE Challenge
-    BFF->>React: Sets State & Nonce in secure encrypted cookies
+    Note over BFF: BFF generates cryptographic security strings:<br/>1. State_A1 (For CSRF protection)<br/>2. Nonce_B2 (For Replay protection)<br/>3. Raw_PKCE_Verifier (The secret password)
     
-    React->>Auth0: 2. Redirects to Auth0<br/>(state=A1, nonce=B2, code_challenge=C3)
+    BFF->>BFF: Hashes Raw_PKCE_Verifier to create PKCE_Challenge_Hash
+    BFF->>React: Sets State_A1 & Nonce_B2 in secure encrypted cookies
     
+    React->>Auth0: Browser Redirects to Auth0
+    Note over React, Auth0: URL: ?response_type=code & state=State_A1 & nonce=Nonce_B2<br/>& code_challenge=PKCE_Challenge_Hash & code_challenge_method=S256
+    
+    Note over React, Auth0: Phase 2: User Authentication & Callback
     Auth0-->>React: Prompts for Credentials & MFA
-    React->>Auth0: 3. Authenticates successfully
+    React->>Auth0: Authenticates successfully
     
-    Auth0->>React: 4. Redirects back to React/BFF<br/>(?code=AuthCode_99 & state=A1)
+    Auth0->>React: Redirects back to React/BFF callback URL
+    Note over React, Auth0: URL: ?code=AuthCode_99 & state=State_A1
     
-    Note over BFF: Phase 2: The Security Verifications
-    BFF->>BFF: 5. Verifies URL `state` matches Browser Cookie `state`
+    Note over BFF: Phase 3: The Security Verifications
+    BFF->>BFF: SECURITY CHECK 1 (CSRF):<br/>Verifies URL `state` matches Browser Cookie `State_A1`
     
-    BFF->>Auth0: 6. POST /token (code=AuthCode_99, code_verifier=Raw_C3)
-    Auth0->>Auth0: 7. PKCE Check: Hashes Raw_C3. Does it match Challenge C3?
+    BFF->>Auth0: POST /token (Trades Code for Tokens)
+    Note over BFF, Auth0: Payload: code=AuthCode_99 & code_verifier=Raw_PKCE_Verifier<br/>& client_secret=BFF_Secret
     
-    Auth0-->>BFF: 8. Returns ID Token & Access Token
+    Auth0->>Auth0: SECURITY CHECK 2 (PKCE):<br/>Hashes Raw_PKCE_Verifier. Does it exactly match PKCE_Challenge_Hash?
     
-    BFF->>BFF: 9. Verifies JWT Signature. Extracts `nonce` from ID Token.
-    BFF->>BFF: 10. Verifies Token `nonce` matches Browser Cookie `nonce`
+    Auth0-->>BFF: Returns ID Token (JWT) & Access Token
     
-    BFF-->>React: 11. Success! Issues secure HttpOnly Session Cookie.
+    Note over BFF: Phase 4: The Final Inspection
+    BFF->>BFF: Verifies ID Token JWT Signature using Auth0's Public Key
+    BFF->>BFF: SECURITY CHECK 3 (Replay):<br/>Extracts `nonce` from ID Token. Does it match Browser Cookie `Nonce_B2`?
+    
+    BFF-->>React: Success! Issues strictly encrypted HttpOnly Session Cookie.
+    Note over React, BFF: React never touches the OAuth tokens.<br/>XSS token theft vulnerability is mathematically neutralized!
 
-```
+````
 
 ### Step-by-Step Breakdown
 
 **Phase 1: The Setup (Steps 1-2)**
 
-1. The user clicks Login. The React app calls the .NET backend. The backend generates three random strings: the `state`, the `nonce`, and the PKCE `code_verifier`. It stores these temporarily in an encrypted cookie on the user's browser. It hashes the PKCE string to create the `code_challenge`.
-2. The browser is redirected to Auth0, carrying the `state`, `nonce`, and `code_challenge` in the URL.
+1. The user clicks Login. The React app calls the .NET backend. The backend generates three random cryptographic strings: `State_A1`, `Nonce_B2`, and the `Raw_PKCE_Verifier`. It stores `State_A1` and `Nonce_B2` temporarily in an encrypted cookie on the user's browser. It then hashes the `Raw_PKCE_Verifier` to create the `PKCE_Challenge_Hash`.
+2. The browser is redirected to Auth0, carrying `State_A1`, `Nonce_B2`, and the `PKCE_Challenge_Hash` inside the URL.
 
 **Phase 2: The Callback & State Check (Steps 3-5)**
 
-3. The user authenticates at Auth0.
-4. Auth0 redirects the browser back to the app with the Authorization Code and the `state`.
-5. **Security Check 1 (CSRF):** The .NET backend looks at the `state` in the URL and compares it to the `state` in the browser cookie. If they match, it proves this exact browser session initiated the request.
+3. The user authenticates at Auth0 with their credentials and MFA.
+4. Auth0 redirects the browser back to the React/BFF callback URL, attaching the temporary Authorization Code and `State_A1`.
+5. **Security Check 1 (CSRF):** The .NET backend looks at the state parameter in the URL (`State_A1`) and compares it to the state saved in the browser cookie (`State_A1`). Because they match perfectly, it proves this exact browser session initiated the request, defeating Cross-Site Request Forgery.
 
 **Phase 3: The Exchange & PKCE Check (Steps 6-8)**
 
-6. The .NET backend opens a secure back-channel to Auth0 to trade the code. It sends the raw PKCE `code_verifier` it generated in Step 1.
-7. **Security Check 2 (Interception):** Auth0 hashes the raw `code_verifier` and checks if it matches the `code_challenge` from Step 2. If it does, Auth0 knows the code wasn't stolen by a middleman.
-8. Auth0 returns the tokens. Because this is OIDC, it physically embeds the original `nonce` inside the ID Token JWT.
+6. The .NET backend opens a secure, direct back-channel to Auth0 to trade the code. It sends the `Raw_PKCE_Verifier` it generated back in Step 1.
+7. **Security Check 2 (Interception):** Auth0 hashes the incoming `Raw_PKCE_Verifier` and checks if it exactly matches the `PKCE_Challenge_Hash` it received in Step 2. Because the math checks out, Auth0 knows the code wasn't intercepted by a malicious browser extension.
+8. Auth0 returns the Access Token and ID Token. Because this is an OIDC flow, Auth0 physically embeds the original `Nonce_B2` inside the payload of the signed ID Token JWT.
 
 **Phase 4: The ID Token & Nonce Check (Steps 9-11)**
 
-9. The .NET backend validates the ID Token's digital signature.
-10. **Security Check 3 (Replay):** The backend reads the `nonce` inside the token and checks if it matches the `nonce` cookie from Step 1. If it matches, the backend knows this token was freshly minted for this specific login attempt, and not an old token stolen by a hacker.
-11. The backend establishes a secure session (usually via an `HttpOnly` cookie) for the React app to use.
+9. The .NET backend mathematically validates the ID Token's digital signature using Auth0's Public Key to ensure it hasn't been tampered with.
+10. **Security Check 3 (Replay):** The backend extracts the nonce from inside the JWT and checks if it matches the `Nonce_B2` cookie from Step 1. Because it matches, the backend knows this token was freshly minted for this exact login attempt, defeating replay attacks using stolen, old tokens.
+11. The backend establishes a secure session for the React app by issuing a strictly encrypted `HttpOnly` cookie. The React app never touches the OAuth tokens, completely neutralizing XSS token theft!
 
 ### The Architect's Deep Dive: Why is the .NET Backend doing the PKCE math?
 
 You might be wondering: *Historically, wasn't PKCE invented specifically for applications that do NOT have a backend (like pure React SPAs or Mobile apps) because they cannot safely store a `client_secret`?* Yes! But modern enterprise architecture has shifted.
 
-#### Architecture A: The Pure SPA PKCE Flow (The Old Way)
+#### Architecture A: The Pure SPA PKCE Flow (The "Legacy" Modern Way)
 
-If you build a React app with absolutely no backend, React **must** do the PKCE math itself. It generates the hash, trades the code directly with Auth0, and saves the resulting tokens in `localStorage` or memory.
+If you build a React app with absolutely no backend, React **must** do the PKCE math itself. It generates the hash, trades the code directly with Auth0, and saves the resulting tokens in the browser using the Web Storage API (`localStorage` or `sessionStorage`).
 
-**The Fatal Flaw of Architecture A:** If a hacker executes a Cross-Site Scripting (XSS) attack on your React app, their malicious JavaScript can read `localStorage`, steal the Access and Refresh tokens, and take over the user's account. Because of this, security architects are actively moving away from Pure SPA flows for highly sensitive apps.
+> **The Fatal Flaw: The Web Storage Trap**
+> Many developers believe switching from `localStorage` to `sessionStorage` solves the security problem because `sessionStorage` is deleted when the tab closes. **This is a dangerous misconception.**
+> * **The Reality:** Both `localStorage` and `sessionStorage` are part of the Web Storage API, which is **fully accessible to JavaScript.**
+> * **The Attack:** If a hacker executes a Cross-Site Scripting (XSS) attack (via a compromised NPM package or an injected script), they don't care if the token expires when the tab closes. They will use a single line of code—`window.sessionStorage.getItem('access_token')`—to steal the token **instantly** while the user is still active.
+> 
+> 
+> Because of this, security architects are moving away from Pure SPA flows for apps that handle sensitive data (FinTech, Healthcare, etc.).
+
+#### Architecture B: The BFF Pattern (The Modern Standard)
+
+To mathematically neutralize the XSS threat, architects introduced the **Backend-For-Frontend (BFF)** pattern.
+
+In this pattern, you decide that **JavaScript is a hostile environment.** You never allow the React app to see, hold, or store the OAuth tokens. Instead, you create a lightweight .NET Backend that handles the entire OAuth flow.
+
+**The Solution: The `HttpOnly` Cookie**
+Instead of sending tokens to React, the .NET Backend stores them in its own secure server-side memory and issues a session cookie to the browser with the **`HttpOnly`** flag.
+
+* **Why it works:** When a cookie is marked `HttpOnly`, the browser’s security engine **physically prevents JavaScript from reading it.**
+* **The Result:** Even if a hacker successfully executes an XSS attack, their script will find **nothing** in `localStorage` or `sessionStorage`. When they try to read `document.cookie`, the browser hides the session cookie from them. The tokens remain invisible and untouchable.
+
+---
 
 #### Architecture B: The BFF Pattern (The Modern Standard)
 
