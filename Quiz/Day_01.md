@@ -451,10 +451,10 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.Run();
-
 ```
 
 By combining **Private Key JWT** for application-level cryptographic proof and **mTLS** for network-level physical machine verification, you achieve the highest tier of API security possible (often mandated by Open Banking (PSD2) and government defense networks).
+
 ---
 
 **Scenario 2: The Corporate Workday Login (Enterprise SSO)**
