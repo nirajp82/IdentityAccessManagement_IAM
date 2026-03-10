@@ -85,9 +85,8 @@ Instead of sending a permanent password on every single API call, the script sec
 * **Principle of Least Privilege (Scopes):** When the script asks for a token, it asks for specific *scopes* (e.g., `scope=logs:read`). Even if the Service Account is powerful, the specific token it uses for that API call is physically restricted from doing anything else.
 * **Service Accounts:** The identity belongs to the *application* (e.g., `Backup_Microservice`), not a human. Human turnover never breaks the system.
 
-### How it Works (The Flow)
+### How it Works (The OAuth 2.0 Client Credentials Flow.)
 
-Here is exactly how the machines talk to each other to make this happen securely.
 
 ```mermaid
 sequenceDiagram
