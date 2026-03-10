@@ -603,11 +603,15 @@ sequenceDiagram
 3. Twitter asks the manager to log in (Authentication) and then displays the Consent Screen: *"Do you want to allow Buffer to post tweets for you?"* The manager clicks "Allow" (Delegated Authorization).
 
 **Phase 2: The Token Exchange (Steps 4-6)**
+
+
 4. Twitter redirects the manager's browser back to Buffer, handing it a temporary, short-lived **Authorization Code** (`AuthCode_123`).
 5. Buffer's backend opens a secure, direct server-to-server tunnel to Twitter. It hands over the Authorization Code along with its own heavily guarded password (`client_secret`) to prove it is the real Buffer app.
 6. Twitter verifies everything and hands Buffer the **Access Token**. *Notice that Twitter does NOT return an ID Token here.*
 
 **Phase 3: The API Call (Steps 7-8)**
+
+
 7. Later that afternoon, when a scheduled tweet is ready to go out, Buffer's backend calls the Twitter API. It attaches the Access Token in the `Authorization: Bearer` header.
 8. The Twitter API verifies the token mathematically, checks that it possesses the `tweet:write` scope, and successfully publishes the tweet on behalf of the agency.
 
