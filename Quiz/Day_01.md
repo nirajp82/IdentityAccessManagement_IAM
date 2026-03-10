@@ -554,8 +554,6 @@ We can definitively say this scenario is pure OAuth 2.0 because of one specific 
 3. **The Goal of the Application:** * **OIDC's Goal:** "I want to log the user into my app." (e.g., Spotify letting you "Log in with Facebook" to create a profile).
 * **OAuth 2.0's Goal:** "I want to do a job on behalf of the user." Buffer doesn't use Twitter to log the marketing manager into the Buffer dashboard. The manager already logged into Buffer using their own email/password. Buffer just needs temporary permission to reach across the internet and touch Twitter's API.
 
-
-
 > **The Architect's Rule of Thumb:**
 > If the application gets a token and says, *"Great, now I can read/write data to an external API,"* it is **OAuth 2.0**.
 > If the application gets a token, opens it up to read an email address, and says, *"Great, now I know who is sitting at the keyboard so I can log them in,"* it is **OIDC**.
@@ -613,7 +611,79 @@ sequenceDiagram
 **Phase 3: The API Call (Steps 7-8)**
 7. Later that afternoon, when a scheduled tweet is ready to go out, Buffer's backend calls the Twitter API. It attaches the Access Token in the `Authorization: Bearer` header.
 8. The Twitter API verifies the token mathematically, checks that it possesses the `tweet:write` scope, and successfully publishes the tweet on behalf of the agency.
+
 ---
+
+**Scenario 4: The "Log in with Apple" Mobile App (OpenID Connect)**
+
+**The Setup:** A startup launches a new Fitness App on the iOS App Store. Instead of making users type a password, they add a "Log in with Apple" button. The user uses FaceID. Apple sends the Fitness App's backend a digitally signed JSON Web Token (JWT) that says: `{"sub": "apple_user_99", "email": "user@icloud.com"}`. The Fitness App reads the JSON, sees the email, and creates a new profile for the user in its own database.
+
+* **The Protocol:** **OpenID Connect (OIDC)**
+* **The Verdict:** Modern Identity. It rides on top of the OAuth 2.0 chassis, but it explicitly asks for the `openid` scope to get an **ID Token** (the JWT). It is built for modern web and mobile apps because JSON is vastly lighter and easier to parse than SAML's heavy XML.
+
+### The Architect's Note: Why is this OIDC and NOT pure OAuth 2.0?
+
+This is the exact opposite of the "Buffer / Twitter" scenario.
+
+The Fitness App doesn't want to read the user's Apple Music or modify their iCloud Drive (which would be delegated access / OAuth 2.0). The Fitness App *only* wants Apple to securely vouch for the user's identity so the app doesn't have to build its own password database.
+
+1. **The Magic Scope (`openid`):** When the mobile app opens the Apple login screen, it includes `scope=openid profile email` in the URL. This is the universal trigger that tells the Authorization Server: *"I am executing an OpenID Connect login."*
+2. **The ID Token (The Digital Badge):** Because the app asked for the `openid` scope, Apple returns an **ID Token** alongside the standard Access Token. The ID Token is a cryptographically signed JSON Web Token (JWT).
+3. **Identity Extraction:** The Fitness App's backend cracks open this JWT, verifies Apple's digital signature, and reads the `email` and `sub` (subject identifier) inside. It uses this verified data to say, *"Ah, this is John. Let me log him into our Fitness system."*
+
+### How it Works: The Mobile OIDC Flow with PKCE
+
+Because this involves a mobile app (a "Public Client" where hackers can decompile the code), it **must** use the **Authorization Code Flow with PKCE**. Furthermore, mobile apps typically use their own Backend API to do the heavy lifting and keep the final sessions secure.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as User (FaceID)
+    participant Mobile as Fitness App (iOS)
+    participant Backend as Fitness Backend (.NET)
+    participant Apple as Apple Auth Server
+
+    User->>Mobile: 1. Taps "Log in with Apple"
+    Mobile->>Mobile: Generates PKCE Secret & Hash
+    
+    Note over Mobile, Apple: Phase 1: Authentication & Code
+    Mobile->>Apple: 2. Opens secure system browser to Apple<br/>(Sends PKCE Hash & scope=openid)
+    Apple-->>User: Prompts FaceID
+    User->>Apple: 3. Authenticates via FaceID
+    
+    Apple->>Mobile: 4. Redirects to App URI scheme (myapp://callback?code=123)
+    
+    Note over Mobile, Backend: Phase 2: Secure Backend Handoff
+    Mobile->>Backend: 5. POST /api/login (Sends Code + Raw PKCE Secret)
+    
+    Backend->>Apple: 6. POST /token (Trades Code + PKCE for Tokens)
+    Apple->>Apple: Verifies PKCE Secret matches Step 2 Hash
+    Apple-->>Backend: 7. Returns OIDC ID Token (JWT)
+    
+    Note over Backend: Phase 3: Identity Verification & Session
+    Backend->>Backend: 8. Verifies Apple's JWT Signature locally.<br/>Extracts user@icloud.com.
+    Backend->>Backend: Finds/Creates user in SQL Database.
+    Backend-->>Mobile: 9. Returns internal App Session Token (User is logged in!)
+
+```
+
+### Step-by-Step Breakdown
+
+**Phase 1: Authentication & The Code (Steps 1-4)**
+
+1. The user taps the login button. The mobile app generates a random PKCE password, hashes it, and saves the raw password in its local memory.
+2. The app opens a secure system browser (like `ASWebAuthenticationSession` on iOS) and navigates to Apple, passing the PKCE hash and requesting the `openid` scope.
+3. Apple verifies the user via FaceID.
+4. Apple generates a temporary Authorization Code and redirects the browser back into the native app using a custom URI scheme (e.g., `fitnessapp://callback?code=ABC`).
+
+**Phase 2: Secure Backend Handoff (Steps 5-7)**
+5. *Architectural Best Practice:* The mobile app does NOT trade the code with Apple itself. Instead, it securely hands the Authorization Code and the raw PKCE password to its own .NET Backend API.
+6. The .NET Backend opens a highly secure, server-to-server tunnel to Apple. It hands over the code, the PKCE password, and its own backend credentials.
+7. Apple verifies the PKCE math. Because it matches, Apple knows no malicious app intercepted the code on the phone. Apple hands the **ID Token (JWT)** to the .NET Backend.
+
+**Phase 3: Identity Verification & App Session (Steps 8-9)**
+8. The .NET Backend receives the ID Token. It downloads Apple's Public Key to verify the digital signature (ensuring a hacker didn't spoof the token). Once the math passes, it opens the JSON payload, reads `user@icloud.com`, and either creates a new user in the Fitness SQL database or finds their existing profile.
+9. Finally, the .NET Backend generates its *own* internal session token (or sets an `HttpOnly` cookie) and hands it down to the mobile app. The user is officially logged into the Fitness App!
 
 ---
 
