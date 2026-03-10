@@ -776,20 +776,81 @@ sequenceDiagram
 2. The browser is redirected to Auth0, carrying the `state`, `nonce`, and `code_challenge` in the URL.
 
 **Phase 2: The Callback & State Check (Steps 3-5)**
+
 3. The user authenticates at Auth0.
 4. Auth0 redirects the browser back to the app with the Authorization Code and the `state`.
 5. **Security Check 1 (CSRF):** The .NET backend looks at the `state` in the URL and compares it to the `state` in the browser cookie. If they match, it proves this exact browser session initiated the request.
 
 **Phase 3: The Exchange & PKCE Check (Steps 6-8)**
+
 6. The .NET backend opens a secure back-channel to Auth0 to trade the code. It sends the raw PKCE `code_verifier` it generated in Step 1.
 7. **Security Check 2 (Interception):** Auth0 hashes the raw `code_verifier` and checks if it matches the `code_challenge` from Step 2. If it does, Auth0 knows the code wasn't stolen by a middleman.
 8. Auth0 returns the tokens. Because this is OIDC, it physically embeds the original `nonce` inside the ID Token JWT.
 
 **Phase 4: The ID Token & Nonce Check (Steps 9-11)**
+
 9. The .NET backend validates the ID Token's digital signature.
 10. **Security Check 3 (Replay):** The backend reads the `nonce` inside the token and checks if it matches the `nonce` cookie from Step 1. If it matches, the backend knows this token was freshly minted for this specific login attempt, and not an old token stolen by a hacker.
 11. The backend establishes a secure session (usually via an `HttpOnly` cookie) for the React app to use.
 
+### The Architect's Deep Dive: Why is the .NET Backend doing the PKCE math?
+
+You might be wondering: *Historically, wasn't PKCE invented specifically for applications that do NOT have a backend (like pure React SPAs or Mobile apps) because they cannot safely store a `client_secret`?* Yes! But modern enterprise architecture has shifted.
+
+#### Architecture A: The Pure SPA PKCE Flow (The Old Way)
+
+If you build a React app with absolutely no backend, React **must** do the PKCE math itself. It generates the hash, trades the code directly with Auth0, and saves the resulting tokens in `localStorage` or memory.
+
+**The Fatal Flaw of Architecture A:** If a hacker executes a Cross-Site Scripting (XSS) attack on your React app, their malicious JavaScript can read `localStorage`, steal the Access and Refresh tokens, and take over the user's account. Because of this, security architects are actively moving away from Pure SPA flows for highly sensitive apps.
+
+#### Architecture B: The BFF Pattern (The Modern Standard)
+
+To fix the XSS vulnerability, architects introduced the **Backend-For-Frontend (BFF)** pattern (which we used in the Step-by-Step flow above).
+
+In this pattern, you decide that React is too dangerous to hold tokens. You create a lightweight .NET Backend whose *only* job is to handle the OAuth flow and hold the tokens securely in server memory, issuing only an encrypted `HttpOnly` session cookie to the browser.
+
+**But if .NET has a secure `client_secret`, why does it still use PKCE?**
+This is the new rule in the **OAuth 2.1 Security Best Current Practices (BCP)**. Even though .NET has a secure password (`client_secret`), the temporary Authorization Code still has to travel through the user's browser during the redirect. If a malicious browser extension intercepts that Code, they might attempt an advanced injection attack.
+
+By forcing the .NET backend to use **both** a `client_secret` AND `PKCE`, you achieve ultimate "Defense in Depth":
+
+1. The `client_secret` proves *who* is asking for the token (The real .NET server).
+2. The `PKCE Verifier` proves that the server asking for the token is the *exact same server* that initiated the login 30 seconds ago.
+
+#### Reference: The Pure React (No .NET) PKCE Flow
+
+If you *must* build a system without a BFF, here is the exact Mermaid diagram for a **Pure React SPA** handling PKCE all by itself. Notice how Auth0 returns the tokens directly to the browser, and there is no `client_secret` involved.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant React as React SPA (Browser)
+    participant Auth0 as Auth0 (Identity Provider)
+    participant API as External API (Resource Server)
+
+    React->>React: 1. User clicks "Login"
+    React->>React: Generates PKCE Verifier & PKCE Challenge
+    
+    React->>Auth0: 2. Redirects to Auth0<br/>(code_challenge=C3 & response_type=code)
+    
+    Auth0-->>React: Prompts for Credentials
+    React->>Auth0: 3. Authenticates successfully
+    
+    Auth0->>React: 4. Redirects back to React<br/>(?code=AuthCode_99)
+    
+    React->>Auth0: 5. POST /token <br/>(code=AuthCode_99, code_verifier=Raw_C3, client_id=ReactApp)
+    Note over React, Auth0: Notice there is NO client_secret here!
+    
+    Auth0->>Auth0: 6. PKCE Check: Hashes Raw_C3. Does it match Challenge C3?
+    
+    Auth0-->>React: 7. Returns ID Token & Access Token
+    React->>React: 8. Saves Tokens in memory/localStorage (High XSS Risk!)
+    
+    React->>API: 9. GET /data (Header: Bearer Access_Token)
+
+```
+
+---
 ---
 
 ## Part 3: The IAM Architect Pop Quiz
