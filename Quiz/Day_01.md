@@ -680,11 +680,15 @@ sequenceDiagram
 4. Apple generates a temporary Authorization Code and redirects the browser back into the native app using a custom URI scheme (e.g., `fitnessapp://callback?code=ABC`).
 
 **Phase 2: Secure Backend Handoff (Steps 5-7)**
+
+
 5. *Architectural Best Practice:* The mobile app does NOT trade the code with Apple itself. Instead, it securely hands the Authorization Code and the raw PKCE password to its own .NET Backend API.
 6. The .NET Backend opens a highly secure, server-to-server tunnel to Apple. It hands over the code, the PKCE password, and its own backend credentials.
 7. Apple verifies the PKCE math. Because it matches, Apple knows no malicious app intercepted the code on the phone. Apple hands the **ID Token (JWT)** to the .NET Backend.
 
 **Phase 3: Identity Verification & App Session (Steps 8-9)**
+
+
 8. The .NET Backend receives the ID Token. It downloads Apple's Public Key to verify the digital signature (ensuring a hacker didn't spoof the token). Once the math passes, it opens the JSON payload, reads `user@icloud.com`, and either creates a new user in the Fitness SQL database or finds their existing profile.
 9. Finally, the .NET Backend generates its *own* internal session token (or sets an `HttpOnly` cookie) and hands it down to the mobile app. The user is officially logged into the Fitness App!
 
