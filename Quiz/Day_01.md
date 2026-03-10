@@ -123,6 +123,8 @@ sequenceDiagram
 3. The Auth Server verifies the credentials and issues a temporary Access Token (usually a JWT). *Crucially, the `client_secret` is never sent again after this step.*
 
 **Phase 2: The API Call**
+
+
 4. The script now calls the actual API it wants to use (e.g., the Log API).
 5. It places the temporary Access Token in the `Authorization: Bearer` HTTP header.
 6. The API Gateway sees the token, checks the digital signature (to ensure the Auth Server actually issued it), checks the expiration time, and checks if the token has the `logs:read` scope. If everything passes, the data is returned.
