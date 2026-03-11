@@ -1,7 +1,5 @@
 # The Ultimate IAM & OAuth 2.0 Architecture Quiz
 
-Test your architectural instincts. Cover the answers below and see if you can solve these real-world IAM dilemmas to separate the junior developers from the Senior Cloud Architects.
-
 ## Part 1: Enterprise Single Sign-On (The Okta & AWS Cloud Flow)
 
 **Use Case (The AWS Scenario):**
