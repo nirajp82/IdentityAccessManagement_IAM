@@ -1,5 +1,17 @@
 # The Ultimate IAM & OAuth 2.0 Architecture Quiz
 
+> Federation in Identity and Access Management (IAM) means that one system outsources the authentication process to another trusted system. 
+
+### How it works
+
+1. A user tries to access an application.
+2. The application **does not authenticate the user itself**.
+3. Instead, it **outsources authentication** to a trusted **Identity Provider (IdP)**.
+4. The Identity Provider verifies the user’s identity.
+5. The IdP sends a **signed identity assertion/token** back to the application.
+6. The application **trusts the IdP’s verification** and grants access.
+
+   
 ## Part 1: Enterprise Single Sign-On (The Okta & AWS Cloud Flow)
 
 **Use Case (The AWS Scenario):**
