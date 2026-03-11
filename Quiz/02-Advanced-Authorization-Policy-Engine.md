@@ -152,14 +152,54 @@ public async Task<IActionResult> StartGpu(string workspaceId)
 }
 
 ```
+### The Architect's Deep Dive: How does .NET actually get the `true/false`?
 
-### The Architect's Deep Dive: Where did the logic go?
+You might be looking at that clean C# controller code and thinking: *"Wait, if my API isn't querying the database anymore, how do we know if the account is suspended? How does .NET physically get the 'Yes' or 'No'?"*
 
-You might be looking at that clean C# code and thinking: *"Wait, if my .NET API isn't querying the Billing database anymore, how do we know if the account is suspended?"*
+The logic didn't disappear; it moved to the **PDP (Policy Decision Point)**. The .NET API and the Policy Engine communicate over a blazing-fast local HTTP REST call.
 
-The logic didn't disappear; it moved to the **PDP**.
+Here is exactly how the pipeline works, from the C# Client to the Policy Engine and back.
 
-Instead of writing C#, your security team maintains a text file (Policy-as-Code) that lives inside the Policy Engine. When your .NET API calls `EvaluateAsync`, the engine executes a policy that looks something like this (using a language like Rego):
+#### Step 1: The .NET HTTP Client (The Bridge)
+
+When your controller calls `_policyEngineClient.EvaluateAsync(...)`, .NET cannot just send raw strings over the wire. It must serialize the variables into a specific JSON envelope called the `input` object, and POST it to the local Policy Engine (running as a sidecar container on `localhost`).
+
+```csharp
+// The physical bridge between .NET and the Policy Engine
+public async Task<bool> EvaluateAsync(string subject, string action, string resource, string tenantId)
+{
+    // 1. Build the exact JSON envelope the Policy Engine expects
+    var requestPayload = new
+    {
+        input = new
+        {
+            subject = subject,
+            action = action,
+            resource = resource,
+            user_tenant_id = tenantId
+        }
+    };
+
+    // 2. Make the sub-millisecond POST request to the local sidecar.
+    // Notice the URL path maps directly to our policy package name!
+    var response = await _httpClient.PostAsJsonAsync("http://localhost:8181/v1/data/authorization/gpus", requestPayload);
+
+    if (!response.IsSuccessStatusCode) return false; // Fail secure
+
+    // 3. Deserialize the JSON response back into C# objects
+    var opaResponse = await response.Content.ReadFromJsonAsync<OpaResponse>();
+
+    // 4. Return the raw boolean to the controller
+    return opaResponse?.Result?.Allow ?? false;
+}
+
+```
+
+#### Step 2: The Policy-as-Code (The Logic inside the PDP)
+
+When the Policy Engine receives that JSON `input`, it evaluates it against a text file maintained by your security team (written in a language like Rego).
+
+To calculate the `allow` boolean, Rego uses an **Implicit AND**. Inside an `allow { ... }` block, every single line must evaluate to `true`. If even one line fails (e.g., the billing API returns "Suspended"), the entire block instantly fails, and the engine defaults to `false`.
 
 ```rego
 # Policy-as-Code living inside the PDP (e.g., Open Policy Agent)
@@ -170,18 +210,20 @@ default allow = false
 
 # 2. Rule: Starting a GPU
 allow {
-    # Check the Action explicitly!
+    # Condition A: Check the Action explicitly! (Prevents Privilege Escalation)
     input.action == "start_gpu"
     
-    # The PDP fetches the workspace data...
+    # Condition B: The PDP fetches the workspace data...
     workspace := data.workspaces[input.resource]
     
-    # It checks the tenant match...
+    # Condition C: It checks the tenant match...
     workspace.tenant_id == input.user_tenant_id
     
-    # It queries the Billing API...
+    # Condition D: It queries the Billing API...
     billing_response := http.send({"method": "GET", "url": "http://billing-service/status"})
     billing_response.body == "Active"
+    
+    # If A AND B AND C AND D are all true, "allow" becomes TRUE.
 }
 
 # 3. Rule: Viewing GPU Status (A different action with lighter rules)
@@ -191,16 +233,21 @@ allow {
     workspace := data.workspaces[input.resource]
     workspace.tenant_id == input.user_tenant_id
     
-    # Notice: We don't care if billing is suspended just to view the status,
-    # so we omit the billing check for this specific action.
+    # Notice: We omit the billing check here, because viewing status is free.
 }
+
 ```
+
+When the engine finishes evaluating, it wraps the final boolean in a JSON response (`{ "result": { "allow": true } }`) and fires it back to your .NET `HttpClient` in under a millisecond.
+
+---
 
 ### Why this is an Architectural Masterpiece:
 
-* **Stateless Security:** Your .NET code no longer knows *why* Alice was allowed or denied. It doesn't know what a Tenant ID is, and it doesn't know what a Billing Status is. It just knows the Policy Engine said `true`.
+* **Stateless Security:** Your .NET code no longer knows *why* Alice was allowed or denied. It doesn't know what a Tenant ID is, and it doesn't know what a Billing Status is. It just knows the Policy Engine sent back `{"allow": true}`.
 * **Agility (Zero-Downtime Updates):** If the enterprise requires a new rule tomorrow, the .NET engineers **do not write a single line of C# code**. The security team simply updates the text-based policy file inside the Policy Engine. The rules change dynamically across your entire global infrastructure instantly.
 * **Centralized Auditing:** You now have a single repository of policy files that prove exactly who has access to what, which makes passing compliance audits (SOC2, HIPAA) trivial.
+
 ---
 
 ### Phase 5: The Enterprise Solution (ReBAC & Decoupled Policy Engines)
