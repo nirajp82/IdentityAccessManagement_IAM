@@ -251,7 +251,7 @@ When the engine finishes evaluating, it wraps the final boolean in a JSON respon
 ---
 ### Phase 5: Surviving the "Hot Path" (Caching, Latency, and Scale)
 
-Interviewers for Staff/Principal roles actively look for how you handle the physical reality of the PEP/PDP split. Every network hop compounds end-to-end latency. To survive the hot path, you must implement aggressive caching, compiled policies, and push-based invalidation.
+ Every network hop compounds end-to-end latency. To survive the hot path, you must implement aggressive caching, compiled policies, and push-based invalidation.
 
 #### 1. Proximity: Keep the Network off the Critical Path
 
@@ -381,7 +381,65 @@ Similar to AWS STS (Security Token Service), we model cross-account access using
 2. **Role Assumption:** The Support Agent in Account B requests a temporary token to "assume" a role in Tenant A.
 3. **Strict Scoping:** This new JWT is highly restricted. It is **Time-Bounded** (expires in exactly 15 minutes) and **Resource-Bounded** (only granted `read_only` access, regardless of the agent's normal privileges).
 4. **Immutable Auditing:** Every action the Support Agent takes while wearing Tenant A's "mask" is logged with both the `tenant_id` (Tenant A) and the `actor_id` (Support Agent B), proving exactly who did what on whose behalf.
+---
+This is the ultimate evolution of IAM. We have spent the last 7 Phases securing **Human Identity** (Alice trying to start a GPU). But in a modern system, humans make up less than 5% of your traffic. The other 95% are **Machines**: AI agents, background workers, Kubernetes pods, and serverless functions calling your APIs.
 
+If you secure Alice perfectly but give your AI Agent a static, never-expiring API key, your entire security posture is a house of cards.
+
+Interviewers at the Principal level will grill you on **Secret Sprawl**. Here is how we build **Phase 8**, taking those exact bullet points and turning them into a bulletproof Machine-to-Machine (M2M) architecture.
+
+---
+
+### Phase 8: Workload Identity & M2M AuthZ (The "Zero-Secret" Architecture)
+
+#### The Problem: Secret Sprawl
+
+Beginners authorize machine workloads by generating a static `client_secret` or API Key and injecting it into the application via environment variables or a vault.
+**Why this fails at scale:**
+
+1. **Exfiltration:** Developers accidentally commit keys to GitHub, or hackers dump the server's environment variables.
+2. **Rotation Nightmare:** Rotating a static database password or API key requires restarting pods and causes production downtime, so companies simply... don't rotate them. Keys sit in production for years.
+
+#### The Solution: Provenance & Workload Identity Federation
+
+Instead of giving a workload a static password, we give it a dynamically generated cryptographic identity based on its **provenance** (where and how it is running). We eliminate long-lived secrets entirely.
+
+Here is the Architect-level strategy for heterogenous runtimes (K8s, VMs, Serverless).
+
+#### 1. Attested Identity (SPIFFE/SPIRE) & mTLS
+
+You cannot trust a machine just because it asks for access. You must *attest* (prove) its identity.
+
+* **The Framework:** We use the SPIFFE standard (Secure Production Identity Framework for Everyone) and its runtime, SPIRE.
+* **How it works:** A local "Node Agent" sits on the VM or K8s node. When your .NET AI Agent boots up, the Node Agent interrogates the kernel (checking the process ID, the Linux cgroups, the K8s namespace).
+* **The Reward:** Once verified, the Node Agent issues a highly scoped, short-lived (e.g., 5-minute) cryptographic certificate (an SVID) over a local Unix socket.
+* **The Connection:** Your workload uses this certificate to establish **mTLS (Mutual TLS)** with other internal microservices. The application code *never* handles a raw password.
+
+#### 2. Token Exchange via Security Token Service (STS)
+
+What if your K8s pod needs to call an external SaaS API (like AWS S3 or a Stripe API) that doesn't understand your internal mTLS certificates? We use **Workload Identity Federation**.
+
+1. **The Platform Token:** Kubernetes automatically mounts a short-lived Service Account (SA) JWT into your pod's filesystem.
+2. **The Exchange (RFC 8693):** Your workload takes this K8s token and sends it to a central **Security Token Service (STS)**.
+3. **The Federation:** The STS says, *"I trust the Kubernetes OIDC provider. The signature on this K8s token is valid."*
+4. **The Minting:** The STS instantly mints a new, scoped Access Token bound specifically for the target API (e.g., with the exact `audience` and `KID`), and hands it back to the workload.
+
+#### 3. The Sidecar Pattern (Keeping .NET Clean)
+
+If your .NET engineers have to write C# code to manage token exchanges, file-system watching, and certificate rotations, you have failed as an architect.
+
+* **The Fix:** We push this complexity down to the infrastructure layer using a **Sidecar** (like Envoy, Dapr, or an SDK-less local agent).
+* The Sidecar intercepts outbound HTTP calls from your .NET API, automatically fetches the short-lived STS token (or attaches the mTLS certificate), and forwards the request. The C# code just calls `http://target-service` as if it were an open network.
+
+#### 4. Blast Radius & Brief-Lived Context
+
+When the STS issues that token to the AI Agent, it is locked down aggressively to mitigate theft:
+
+* **Brief-Lived:** The token expires in exactly 5 to 15 minutes. Even if a hacker steals it from memory, it becomes useless before they can figure out how to exploit it.
+* **Context-Bound:** The token is cryptographically bound to the environment. The JWT includes claims tying it to a specific `tenant_id`, `project`, or even the `IP/CIDR` block of the AI agent. If the token is fired from a Russian IP, the API Gateway rejects it, even if the signature is perfectly valid.
+* **Rapid Revocation:** Because tokens are so short-lived, you rarely need to "revoke" individual tokens. Instead, you version your signing keys. In an emergency, you rotate the active Key ID (`KID`) at the STS, instantly rendering all previously issued M2M tokens invalid.
+
+---
 ---
 ---
 ---
