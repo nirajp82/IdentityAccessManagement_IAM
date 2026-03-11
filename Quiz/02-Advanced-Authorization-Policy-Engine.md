@@ -102,8 +102,93 @@ public async Task<IActionResult> StartGpu(string workspaceId)
 If the business changes the billing rules, you have to rewrite your C# code, recompile, and deploy the entire API. Furthermore, making 3 database queries just to answer "Can Alice do this?" destroys your API's response time.
 
 ---
+### Phase 4: Decoupling with Policy-Based Access Control (PBAC)
 
-### Phase 4: The Enterprise Solution (ReBAC & Decoupled Policy Engines)
+#### The Problem with the ABAC Code
+
+In the Phase 3 example, the core issue isn't the *attributes* themselves—you absolutely need to know the billing status to make a secure decision. The fatal flaw is **where** those attributes are evaluated.
+
+1. **Tight Coupling:** Your C# business logic is hopelessly tangled with your security logic.
+2. **Deployment Bottlenecks:** If the business decides tomorrow that "GPUs can only be started if the user is in the EU," you have to write new C# code, open a Pull Request, recompile the application, and trigger a full production deployment just to change a single rule.
+3. **The N+1 Latency Tax:** The API is wasting precious compute cycles and database connections (`_userRepo`, `_workspaceRepo`, `_billingClient`) just to figure out if it should reject the request.
+
+#### The PBAC Solution: Separation of Concerns
+
+Policy-Based Access Control (PBAC) solves this by physically splitting your architecture into two distinct components:
+
+1. **The Policy Enforcement Point (PEP):** This is your .NET API. Its only job is to pause the request, ask a question, and enforce the answer. It is completely "dumb" regarding business rules.
+2. **The Policy Decision Point (PDP):** This is a centralized Policy Engine (like Open Policy Agent or a dedicated microservice). It holds all the rules as "Policy-as-Code." It evaluates the rules and returns a strict `Allow` or `Deny` in milliseconds.
+
+---
+
+### The C# Implementation: The Decoupled API
+
+When you adopt PBAC, you rip the database queries and the `if` statements completely out of your controller.
+
+Here is what your Phase 3 code looks like after upgrading to Phase 4:
+
+```csharp
+// Phase 4: The PBAC Pattern (Decoupled & Clean)
+[HttpPost("workspaces/{workspaceId}/gpus/start")]
+public async Task<IActionResult> StartGpu(string workspaceId)
+{
+    // 1. Build the Context (Who, What, Where). Notice: ZERO database queries here!
+    var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    var action = "start_gpu";
+    var resource = $"workspace:{workspaceId}";
+
+    // 2. Ask the Policy Decision Point (PDP)
+    // The API sends a tiny JSON payload to the external Policy Engine.
+    bool isAuthorized = await _policyEngineClient.EvaluateAsync(userId, action, resource);
+
+    // 3. Enforce the Decision (The PEP's only responsibility)
+    if (!isAuthorized)
+    {
+        return Forbid(); 
+    }
+    
+    // 4. Execute Core Business Logic
+    return Ok("Starting GPUs...");
+}
+
+```
+
+### The Architect's Deep Dive: Where did the logic go?
+
+You might be looking at that clean C# code and thinking: *"Wait, if my .NET API isn't querying the Billing database anymore, how do we know if the account is suspended?"*
+
+The logic didn't disappear; it moved to the **PDP**.
+
+Instead of writing C#, your security team maintains a text file (Policy-as-Code) that lives inside the Policy Engine. When your .NET API calls `EvaluateAsync`, the engine executes a policy that looks something like this (using a language like Rego):
+
+```rego
+# Policy-as-Code living inside the PDP
+package authorization.gpus
+
+default allow = false
+
+allow {
+    # The PDP does the heavy lifting. It fetches the workspace data...
+    workspace := data.workspaces[input.resource]
+    
+    # It checks the tenant match...
+    workspace.tenant_id == input.user_tenant_id
+    
+    # It queries the Billing API...
+    billing_status := http.send({"method": "GET", "url": "http://billing-service/status"})
+    billing_status.body == "Active"
+}
+
+```
+
+### Why this is an Architectural Masterpiece:
+
+* **Stateless Security:** Your .NET code no longer knows *why* Alice was allowed or denied. It doesn't know what a Tenant ID is, and it doesn't know what a Billing Status is. It just knows the Policy Engine said `true`.
+* **Agility (Zero-Downtime Updates):** If the enterprise requires a new rule tomorrow, the .NET engineers **do not write a single line of C# code**. The security team simply updates the text-based policy file inside the Policy Engine. The rules change dynamically across your entire global infrastructure instantly.
+* **Centralized Auditing:** You now have a single repository of policy files that prove exactly who has access to what, which makes passing compliance audits (SOC2, HIPAA) trivial.
+---
+
+### Phase 5: The Enterprise Solution (ReBAC & Decoupled Policy Engines)
 
 To solve the limitations of RBAC (lack of context) and ABAC (latency and tight coupling), modern SaaS architectures split the problem into two distinct technologies working together.
 
