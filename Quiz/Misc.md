@@ -9,7 +9,7 @@ Use them as templates; swap in your own examples.
 
 ***
 
-## Script 1 – Generic IAM system design (Staff level, 10–15 minutes)
+## Script 1 – Generic IAM system design
 
 You can use this for almost any “Design an IAM system for our multi‑tenant platform” prompt.
 
