@@ -604,13 +604,11 @@ sequenceDiagram
 
 **Phase 2: The Token Exchange (Steps 4-6)**
 
-
 4. Twitter redirects the manager's browser back to Buffer, handing it a temporary, short-lived **Authorization Code** (`AuthCode_123`).
 5. Buffer's backend opens a secure, direct server-to-server tunnel to Twitter. It hands over the Authorization Code along with its own heavily guarded password (`client_secret`) to prove it is the real Buffer app.
 6. Twitter verifies everything and hands Buffer the **Access Token**. *Notice that Twitter does NOT return an ID Token here.*
 
 **Phase 3: The API Call (Steps 7-8)**
-
 
 7. Later that afternoon, when a scheduled tweet is ready to go out, Buffer's backend calls the Twitter API. It attaches the Access Token in the `Authorization: Bearer` header.
 8. The Twitter API verifies the token mathematically, checks that it possesses the `tweet:write` scope, and successfully publishes the tweet on behalf of the agency.
@@ -715,7 +713,15 @@ Before looking at the diagram, you must understand the distinct job of each para
 #### 1. The `state` Parameter (Defeats CSRF Forgery)
 
 * **The Attack:** Cross-Site Request Forgery (CSRF). A hacker logs into MoneyApp as themselves, pauses the flow, copies the callback URL containing *their* Auth Code, and tricks Alice into clicking it. MoneyApp finishes the login using the hacker's code, permanently linking Alice's bank data to the hacker's account.
-* **The Fix:** Before redirecting Alice to Auth0, the backend generates a random `state` string (e.g., `xyz123`) and saves it in a secure cookie on Alice's browser. It sends `state=xyz123` to Auth0. When Auth0 redirects back, it includes `state=xyz123`. The backend checks if the URL matches Alice's cookie. If the hacker tries to inject their own code, their `state` won't match Alice's cookie, and the connection is blocked.
+  
+**The Fix: State & Cookie Binding**
+Before redirecting Alice to Auth0, the **.NET Backend (BFF)** generates a random, high-entropy `state` string (e.g., `State_A1`).
+
+1. **The Secure Storage:** The .NET Backend sends a `Set-Cookie` header to Alice's browser. The browser saves `State_A1` in a **secure, encrypted cookie** scoped specifically to the `.NET Backend Domain` (e.g., `api.moneyapp.com`).
+2. **The Outbound Request:** The backend sends `state=State_A1` to Auth0 as a URL parameter in the initial authorization redirect.
+3. **The Identity Provider's Job:** Auth0 authenticates Alice and redirects her browser back to the **.NET Backend Callback URL** (e.g., `https://api.moneyapp.com/callback`) with the exact same `state=State_A1` in the query string.
+4. **The Automatic Verification:** When Alice's browser hits the **.NET Backend URL**, the browser's engine sees that the destination matches the domain of the cookie we set in Step 1. It **automatically** attaches Alice's cookies (including the one containing `State_A1`) to the outgoing HTTP request.
+5. **The Match:** The .NET Backend code receives the request and compares the `state` from the **Incoming URL** to the `state` from the **Attached Cookie**.
 
 #### 2. The `PKCE` Parameter (Defeats Code Interception)
 
