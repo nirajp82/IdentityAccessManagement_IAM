@@ -162,23 +162,38 @@ The logic didn't disappear; it moved to the **PDP**.
 Instead of writing C#, your security team maintains a text file (Policy-as-Code) that lives inside the Policy Engine. When your .NET API calls `EvaluateAsync`, the engine executes a policy that looks something like this (using a language like Rego):
 
 ```rego
-# Policy-as-Code living inside the PDP
+# Policy-as-Code living inside the PDP (e.g., Open Policy Agent)
 package authorization.gpus
 
+# 1. Deny everything by default (Zero Trust)
 default allow = false
 
+# 2. Rule: Starting a GPU
 allow {
-    # The PDP does the heavy lifting. It fetches the workspace data...
+    # Check the Action explicitly!
+    input.action == "start_gpu"
+    
+    # The PDP fetches the workspace data...
     workspace := data.workspaces[input.resource]
     
     # It checks the tenant match...
     workspace.tenant_id == input.user_tenant_id
     
     # It queries the Billing API...
-    billing_status := http.send({"method": "GET", "url": "http://billing-service/status"})
-    billing_status.body == "Active"
+    billing_response := http.send({"method": "GET", "url": "http://billing-service/status"})
+    billing_response.body == "Active"
 }
 
+# 3. Rule: Viewing GPU Status (A different action with lighter rules)
+allow {
+    input.action == "view_gpu_status"
+    
+    workspace := data.workspaces[input.resource]
+    workspace.tenant_id == input.user_tenant_id
+    
+    # Notice: We don't care if billing is suspended just to view the status,
+    # so we omit the billing check for this specific action.
+}
 ```
 
 ### Why this is an Architectural Masterpiece:
