@@ -723,15 +723,55 @@ Before redirecting Alice to Auth0, the **.NET Backend (BFF)** generates a random
 4. **The Automatic Verification:** When Alice's browser hits the **.NET Backend URL**, the browser's engine sees that the destination matches the domain of the cookie we set in Step 1. It **automatically** attaches Alice's cookies (including the one containing `State_A1`) to the outgoing HTTP request.
 5. **The Match:** The .NET Backend code receives the request and compares the `state` from the **Incoming URL** to the `state` from the **Attached Cookie**.
 
-#### 2. The `PKCE` Parameter (Defeats Code Interception)
+## 2. The PKCE Parameter (Proof Key for Code Exchange)
 
-* **The Attack:** A malicious browser extension intercepts the callback URL and steals the Authorization Code. It races to the backend to trade the code for an Access Token.
-* **The Fix:** The "Coat Check PIN" analogy. The backend generates a random secret (the `code_verifier`), hashes it, and sends the hash (the `code_challenge`) to Auth0. When the code is traded later, the backend must provide the raw, unscrambled `code_verifier`. The malicious extension might steal the code, but it doesn't have the raw verifier stored in the backend's memory, so Auth0 rejects the hacker's trade.
+### The Attack: Authorization Code Interception
 
-#### 3. The `nonce` Parameter (Defeats ID Token Replay)
+In a standard OAuth flow, the Identity Provider (IdP) sends the **Authorization Code** back to the application via a **302 Redirect**. This is known as the **Front Channel**. Because this code is appended to a URL in the browser's address bar or handled by a mobile OS's "Open-URI" handler, it is effectively traveling on a "Public Street."
 
-* **The Attack:** A hacker intercepts the final OIDC ID Token (the JWT). Two weeks later, they try to inject that same ID Token into the backend to trick the app into thinking the user just logged in.
-* **The Fix:** The "Freshness Seal." The backend generates a random `nonce` (Number Used Once) and sends it to Auth0. Auth0 physically bakes this `nonce` string into the digital signature of the ID Token JWT. When the backend receives the JWT, it cracks it open and says, *"Does the nonce inside this token perfectly match the nonce I generated 30 seconds ago?"* If yes, the token is fresh. If the hacker replays an old token, the nonces won't match, and the login fails.
+**The Scenario:** A malicious browser extension or a "shadow" app on a mobile device can "sniff" this redirect, steal the Authorization Code, and instantly send it to their own server. Since the code is a "Bearer" credential, the IdP historically had no way to know if the person trading the code for a token was the same person who started the login. The hacker trades the stolen code for a real Access Token and hijacks the user's account before the legitimate app even wakes up.
+
+### The Fix: The "Coat Check PIN" Strategy
+
+PKCE (pronounced "pixie") ensures that the person who **starts** the login is the only person who can **finish** it. It does this by creating a dynamic, one-time secret that never travels in the clear until the very last second over a secure back-channel.
+
+1. **The Secret Setup:** Before redirecting the user to Auth0, the **.NET Backend (BFF)** generates a long, random string called the **`Raw_PKCE_Verifier`**. This is your private "PIN." The BFF keeps this secret in its own protected memory.
+2. **The Hashed Challenge:** The BFF hashes that PIN (using SHA-256) to create the **`PKCE_Challenge_Hash`**.
+3. **The Front-Channel Handoff:** The BFF sends the **`PKCE_Challenge_Hash`** to the browser, which carries it to Auth0 during the redirect. Auth0 saves this hash and "binds" it to the user's current session.
+4. **The Interception Attempt:** A hacker steals the **Authorization Code** during the redirect. They try to trade it for a token.
+5. **The Verification (The Back-Channel Proof):** To issue a token, Auth0 now demands the **`Raw_PKCE_Verifier`**.
+* **The Hacker Fails:** The hacker has the code, but they *do not* have the `Raw_PKCE_Verifier` (which never left the .NET Backend's memory).
+* **The .NET Backend Succeeds:** The legitimate .NET Backend sends the `Raw_PKCE_Verifier` directly to Auth0 via a **Secure Back-Channel** (Server-to-Server). Auth0 hashes it. If the result matches the `PKCE_Challenge_Hash` from Step 2, the math proves the identity of the caller.
+
+### 3. The `nonce` Parameter (Number Used Once)
+
+#### The Attack: ID Token Replay
+
+In an OpenID Connect (OIDC) flow, the Identity Provider (IdP) sends back an **ID Token (JWT)** which is the user's "Digital Identity Badge." Because this badge is a signed piece of data, it is valid for a certain amount of time (e.g., 1 hour).
+
+**The Scenario:** A hacker manages to intercept a successful OIDC response. They steal the **ID Token**. Two days later, the hacker tries to "replay" that exact same token to your .NET Backend. Without a `nonce`, your backend might look at the token, see a valid digital signature from Auth0, and say, *"Looks good to me! Welcome back, User."* The hacker has successfully bypassed the entire login process using a stolen, historical "Identity Badge."
+
+#### The Fix: The "Freshness Seal" Strategy
+
+The `nonce` ensures that the ID Token was generated specifically for the login attempt happening **right now**, and cannot be reused from a previous session.
+
+1. **The Freshness Setup:** Before redirecting the user to Auth0, the **.NET Backend (BFF)** generates a random, cryptographically strong string called **`Nonce_B2`**.
+2. **The Delivery:** The BFF sends **`Nonce_B2`** to the browser, which carries it to Auth0 in the URL. Simultaneously, the BFF saves **`Nonce_B2`** in a secure, encrypted cookie on the user's browser (or in its own server-side session).
+3. **The Immutable Bake:** This is the magic step. Auth0 authenticates the user and generates the ID Token. Auth0 physically takes the string **`Nonce_B2`** and embeds it directly into the JSON payload of the JWT. It then signs the JWT.
+> **Architect's Tip:** Because the nonce is part of the signed payload, if a hacker tries to change the nonce to match a different session, they break the digital signature, and the token becomes garbage.
+
+4. **The Validation:** When the .NET Backend receives the ID Token, it performs the **"Freshness Check"**:
+* It cracks open the JWT and finds the `nonce` claim inside.
+* It looks at the **`Nonce_B2`** cookie currently attached to the request.
+* **The Match:** If the `nonce` inside the token exactly matches the `nonce` in the cookie, the backend knows: *"This token was minted just seconds ago for this specific user's login request."*
+* **The Replay Failure:** If a hacker tries to replay a stolen token from yesterday, the `nonce` inside that old token will not match the new, random `nonce` cookie the backend generated for the current request. The backend rejects the token.
+---
+| Parameter | The Secret String | Where it is Stored | How it is Transferred | The Validation (The "Glue") |
+| --- | --- | --- | --- | --- |
+| **`State`** | `State_A1` (Random String) | **Browser Cookie** (Secure & HttpOnly) | **Front-Channel:** Sent to Auth0 in the URL; Auth0 sends it back in the Callback URL. | **The Cross-Check:** The BFF compares the `state` in the **Incoming URL** against the `state` in the **Automatic Cookie**. If they match, the session is legitimate. |
+| **`PKCE`** | `Raw_PKCE_Verifier` (The "PIN") | **BFF Memory** (Never leaves the server) | **The Hash Shift:** BFF hashes the PIN to create a `PKCE_Challenge_Hash`. The **Browser** carries this Hash to Auth0. | **The Math Proof:** At the end, the BFF sends the **Raw PIN** to Auth0 via a Private Back-Channel. Auth0 hashes it; if it matches the original Hash, the "Caller" is verified. |
+| **`Nonce`** | `Nonce_B2` (Random String) | **Browser Cookie** (Secure & HttpOnly) | **The Injection:** Sent to Auth0 in the URL. Auth0 physically **bakes** this string into the ID Token (JWT) payload. | **The Freshness Seal:** The BFF cracks open the ID Token and reads the `nonce` claim. It must match the `Nonce_B2` in the **Current Cookie**. If it matches, the token isn't a "replay" of an old one. |
+
 
 ---
 
