@@ -8,7 +8,7 @@ To move identity securely through a distributed system, we divide the architectu
 
 ---
 
-### 2. Best Practices (What Staff Architects Do)
+### 2. Best Practices
 
 Junior developers usually take the JWT issued by Auth0, send it directly to the user's browser, and then have the browser send that same JWT down through every microservice. **This is a massive security risk.** Here is how Staff Architects engineer the flow.
 
