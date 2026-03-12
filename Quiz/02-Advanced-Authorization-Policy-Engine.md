@@ -248,13 +248,6 @@ When the engine finishes evaluating, it wraps the final boolean in a JSON respon
 * **Agility (Zero-Downtime Updates):** If the enterprise requires a new rule tomorrow, the .NET engineers **do not write a single line of C# code**. The security team simply updates the text-based policy file inside the Policy Engine. The rules change dynamically across your entire global infrastructure instantly.
 * **Centralized Auditing:** You now have a single repository of policy files that prove exactly who has access to what, which makes passing compliance audits (SOC2, HIPAA) trivial.
 ---
-It is completely understandable that Phase 5 (ReBAC and the Google Zanzibar model) feels like entirely new territory. For decades, the industry relied on SQL databases and static roles. ReBAC (Relationship-Based Access Control) is a massive paradigm shift.
-
-To understand how Google solved this, we have to look at the exact wall they hit when building Google Drive, and how that translates perfectly to your "Alice and the H100 GPUs" scenario.
-
-Here is the Architect-level deep dive into Phase 5, culminating in your Whiteboard FAQ.
-
----
 
 ### Phase 5: Solving Data Latency (ReBAC & Google Zanzibar)
 
