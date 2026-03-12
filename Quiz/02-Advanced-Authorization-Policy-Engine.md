@@ -297,7 +297,7 @@ sequenceDiagram
     
     Note over OPA: OPA evaluates the centralized Rego policy file.
     
-    OPA->>SpiceDB: 3. Graph Check: Does `workspace_b#admin@alice` exist?
+    OPA->>SpiceDB: 3. GraphCheck: `workspace_b#admin@alice` exist?
     SpiceDB-->>OPA: 4. Returns: TRUE (Temporary elevation tuple found in <2ms)
     
     OPA->>Billing: 5. Attribute Check: Is `workspace_b` billing == active?
