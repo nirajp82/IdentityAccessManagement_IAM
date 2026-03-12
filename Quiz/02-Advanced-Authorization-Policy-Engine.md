@@ -256,175 +256,165 @@ Here is the Architect-level deep dive into Phase 5, culminating in your Whiteboa
 
 ---
 
-### Phase 5 Deep Dive: How Google Solved the Data Latency Problem
+### Phase 5: Solving Data Latency (ReBAC & Google Zanzibar)
 
-When Google built Google Drive, they realized standard authorization was mathematically impossible to scale. If you have billions of files, deeply nested folders, and millions of users sharing links, an API cannot run a 5-table SQL `JOIN` every time someone clicks a document. It would take seconds to load.
+In Phase 4, we decoupled the logic into the PDP. But we have a new problem: **Data Latency**.
+If the Policy Engine has to query a traditional SQL database to figure out if Alice is a "Workspace Admin", the authorization check will still be too slow. We need ultra-fast data retrieval.
 
-Google needed to evaluate complex, nested permissions globally in **under 10 milliseconds**.
+#### How Google Solved the Problem
 
-To do this, they published the **Zanzibar Paper** (which open-source databases like SpiceDB and Authzed are based on). They abandoned relational tables and built a globally distributed **Graph Database** purpose-built exclusively for permissions.
+When Google built Google Drive, they realized standard authorization was mathematically impossible to scale. If you have billions of files and deeply nested folders, an API cannot run a 5-table SQL `JOIN` every time someone clicks a document. It would take seconds. Google needed to evaluate complex, nested permissions globally in **under 10 milliseconds**.
+
+To do this, they published the **Zanzibar Paper**. They abandoned relational tables entirely and built a globally distributed **Graph Database** purpose-built exclusively for permissions. This model is called **Relationship-Based Access Control (ReBAC)**.
 
 #### The Secret Sauce: The Tuple
 
-In Zanzibar (ReBAC), you do not have "Users" and "Roles" tables. You only have **Tuples** (edges on a graph). A tuple is a simple string that defines a relationship.
+In Zanzibar, you do not have "Users" and "Roles" tables. You only have **Tuples** (edges on a graph). A tuple is a simple string that defines a relationship.
 
 The syntax is always: `object#relation@subject`
 
-If we map your infrastructure into Zanzibar tuples, it looks like this:
+If we map an infrastructure into Zanzibar tuples, it looks like this:
 
-1. `workspace:alpha#viewer@alice` *(Alice is a viewer of Workspace Alpha)*
-2. `gpu:123#parent@workspace:alpha` *(GPU 123 belongs to Workspace Alpha)*
-3. `workspace:alpha#admin@bob` *(Bob is an admin of Workspace Alpha)*
+* `workspace:alpha#viewer@alice` *(Alice is a viewer of Workspace Alpha)*
+* `gpu:123#parent@workspace:alpha` *(GPU 123 belongs to Workspace Alpha)*
 
-#### The Magic: Graph Traversal and Inheritance
+Because this is a graph, the database traverses relationships instantly. If Alice tries to access `gpu:123`, the system does a sub-millisecond graph traversal: Who owns the GPU? (Workspace Alpha). Does Alice have a relationship to Workspace Alpha? (Yes).
 
-Because this is a graph, the database can mathematically traverse relationships instantly.
+#### Use Case: The Lambda Scenario (Alice and the 8x H100 GPUs)
 
-If Alice tries to access `gpu:123`, the API asks Zanzibar: *"Does Alice have access to gpu:123?"*
-Zanzibar does a sub-millisecond graph traversal:
+**The Scenario:** Alice is a "Workspace Viewer" for Project Alpha, but she needs to be temporarily elevated to "Workspace Admin" to spin up 8x H100 GPUs. Furthermore, the API must verify the customer's billing account isn't suspended.
 
-1. Who owns `gpu:123`? $\rightarrow$ `workspace:alpha`.
-2. Does Alice have a relationship to `workspace:alpha`? $\rightarrow$ Yes, `viewer`.
-3. Does `viewer` grant access to GPUs? $\rightarrow$ No. Access Denied.
+1. **The Elevation:** We do not touch Alice's JWT or Auth0 profile. We simply write a new relationship tuple to the Zanzibar database: `workspace:alpha#admin@alice`. We set a Time-To-Live (TTL) on this tuple so it automatically deletes itself after 4 hours.
+2. **The Request:** Alice clicks "Start 8x H100s".
 
-No SQL joins, no fetching user profiles. Just pure graph traversal.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Alice as Alice (Client)
+    participant API as .NET API (Gateway/PEP)
+    participant OPA as OPA Sidecar (PDP)
+    participant SpiceDB as Zanzibar DB (ReBAC Graph)
+    participant Billing as Billing API (ABAC Attributes)
+
+    Alice->>API: 1. POST /workspaces/b/gpus/start
+    
+    Note over API: The .NET API is "dumb". It just extracts Context.
+    
+    API->>OPA: 2. Ask: {subject: "Alice", action: "start_gpu", resource: "workspace_b"}
+    
+    Note over OPA: OPA evaluates the centralized Rego policy file.
+    
+    OPA->>SpiceDB: 3. Graph Check: Does `workspace_b#admin@alice` exist?
+    SpiceDB-->>OPA: 4. Returns: TRUE (Temporary elevation tuple found in <2ms)
+    
+    OPA->>Billing: 5. Attribute Check: Is `workspace_b` billing == active?
+    Billing-->>OPA: 6. Returns: TRUE
+    
+    Note over OPA: Both conditions met.
+    OPA-->>API: 7. Response: { "allow": true }
+    
+    API->>API: 8. Execute Business Logic (Spin up H100s)
+    API-->>Alice: 9. 200 OK (GPUs are booting)
+
+```
+
+**Whiteboard FAQ (The Architect's Defense):**
+
+* **Q: How does our API know if Alice can start a GPU in Workspace B?**
+**A:** We use a decoupled AuthZ microservice. Our API Gateway sends a standardized permission check (`subject: Alice, action: start_gpu, resource: workspace_b`) to our local Policy Engine (OPA). OPA queries our access graph database (SpiceDB) to verify her relationship to the workspace, checks our billing service for active status, and returns a strict Allow/Deny decision in <10ms.
+* **Q: What is the limitation of basic RBAC here?**
+**A:** RBAC lacks multi-tenant context. It says "Admins can start GPUs." It doesn't know *which* workspace the GPU belongs to, or if the customer's billing account is suspended. We need decoupled PBAC to evaluate resource relationships (ReBAC) and dynamic attributes (ABAC) in real-time, keeping our .NET API completely free of security spaghetti-code.
+
+---
+
+### Phase 6: Surviving the "Hot Path" (Caching, Latency, and Scale)
+
+Because Authorization runs on *every single API request*, it sits on the "Hot Path." Every network hop compounds end-to-end latency.
+
+To survive the hot path, architects engineer the deployment specifically for speed.
+
+1. **Proximity (Sidecars & WASM):** You can never put your Policy Engine behind a centralized API Gateway across the internet. The PDP must run as a **Sidecar container** (e.g., an OPA container inside the exact same Kubernetes Pod as your .NET API) to keep the network hop to `localhost`. For ultra-low latency, the policy is compiled into WebAssembly (WASM) and embedded directly *inside* the .NET process memory.
+2. **Compilation & Caching:** Evaluating a complex `.rego` file dynamically is too slow. The PDP compiles policies into fast decision structures (OPA Partial Evaluation). The PEP (.NET API) maintains an in-memory, versioned policy cache (`IMemoryCache`) with a short TTL. If Alice asks to start the GPU 5 times in a minute, the API only asks the PDP once.
+3. **Prewarming:** For your largest enterprise tenants, asynchronously "prewarm" the cache in the background before their users even log in, ensuring their first click is instantaneous.
+4. **Graceful Degradation:** If the OPA sidecar crashes, the system must **Fail Closed**. The default response is a strict `HTTP 403 Forbidden`. For highly available systems, the PEP might carry a hardcoded minimal "safe default" policy allowing basic read-only operations until the engine recovers.
 
 ---
 
-### The Lambda Scenario: Alice and the 8x H100 GPUs
+### Phase 7: Real-Time Propagation & Revocation (Zero-Downtime)
 
-Let's apply this directly to your use case.
+If you use caching (Phase 6), you introduce a dangerous race condition. You must balance speed with real-time security.
 
-**The Scenario:** Alice is a "Workspace Viewer" for Project Alpha, but she needs to be temporarily elevated to "Workspace Admin" to spin up 8x H100 GPUs. Furthermore, we must ensure the customer's billing account is not suspended.
+#### Use Case: The Compromised Laptop
 
-Here is exactly how a modern PBAC + ReBAC architecture handles this without breaking a sweat.
-
-#### Step 1: The Temporary Elevation (Writing to the Graph)
-
-In legacy RBAC, to make Alice an Admin, you would have to update her user profile in Auth0, force her to log out, and log back in to get a new JWT with the "Admin" role.
-
-In ReBAC, we do not touch her identity (AuthN). We simply write a new relationship tuple to the Zanzibar database:
-$\rightarrow$ `workspace:alpha#admin@alice`
-
-*Architect's trick:* Zanzibar implementations allow **TTL (Time-To-Live)** on tuples. We write this tuple with a TTL of 4 hours. When the time expires, the database automatically deletes the tuple, securely revoking her elevation with zero custom code.
-
-#### Step 2: The API Request (The Hot Path)
-
-Alice clicks "Start 8x H100s". Her browser sends a POST request.
-
-1. **The .NET API (The PEP):** The API receives the request. It extracts `subject: Alice`, `action: start_gpu`, and `resource: workspace_alpha`. It forwards this JSON to the OPA sidecar (The PDP).
-2. **The Policy Engine (OPA):** OPA executes the Rego policy. It needs to check two things: Relationships (ReBAC) and State (ABAC).
-3. **The Graph Check (ReBAC):** OPA asks the local Zanzibar database: *"Is Alice an admin of workspace_alpha?"* Because we wrote that tuple in Step 1, Zanzibar returns `TRUE` in $<2\text{ms}$.
-4. **The Attribute Check (ABAC):** Next, OPA pings the internal Billing microservice: *"Is workspace_alpha's billing active?"* The Billing service returns `TRUE`.
-5. **The Handoff:** OPA returns `{"allow": true}` to the .NET API. The GPUs are provisioned.
-
----
-
-### The Whiteboard FAQ (The Architect's Defense)
-
-If you are defending this architecture in a system design review, here is how you expand on those exact Q&As with senior-level depth.
-
-**Q: How does our API know if Alice can start a GPU in Workspace B?**
-
-> **A:** We use a decoupled Policy-Based Access Control (PBAC) architecture. Our API Gateway and microservices are completely stateless regarding security; they act purely as Policy Enforcement Points (PEPs).
-> When Alice attempts to start the GPU, the API sends a standardized permission check (`subject: Alice, action: start_gpu, resource: workspace_b`) to our Open Policy Agent (OPA) sidecar. OPA is the "brain." It evaluates our centralized policies by simultaneously querying our ReBAC access graph database (like SpiceDB/Zanzibar) for her inherited relationships, and our Billing API for real-time attributes. Because the graph data is pre-indexed and the sidecar is local, it returns a strict Allow/Deny decision to the API in under 10ms.
-
-**Q: What is the limitation of basic RBAC here? Why overcomplicate it with ReBAC and OPA?**
-
-> **A:** Basic RBAC completely lacks context and breaks at multi-tenant scale. RBAC can tell us "Alice has the Admin role," but it mathematically cannot answer "Is Alice an Admin *specifically for Workspace B*?"
-> To force RBAC to accommodate multi-tenancy, we would suffer "Role Explosion"—creating thousands of distinct, hardcoded roles (e.g., `WorkspaceB_Admin`, `WorkspaceC_Viewer`) that bloat our databases and crash our JWT headers.
-> Furthermore, RBAC is static. It says "Admins can start GPUs." It doesn't know if the customer's billing account was suspended 5 minutes ago. We must combine ReBAC (to instantly resolve resource relationships like "Who owns this workspace?") and ABAC (to factor in dynamic attributes like billing state). Decoupling this logic into OPA ensures our .NET code remains clean and focused solely on business logic.
-
----
-### Phase 6 Deep Dive: Real-Time Propagation & Revocation
-
-In Phase 5, we solved the database latency by using a fast ReBAC graph. But the network hop between your .NET API and the Policy Engine still takes a few milliseconds. At massive scale, architects cache those decisions in the API's memory (`IMemoryCache`).
-
-But caching introduces the hardest problem in distributed systems: **State Invalidation.**
-
-#### The Architect's Problem: The Stale Cache
-
-If your .NET API caches the decision `{"allow": true}` for Alice for 5 minutes, and Alice gets fired at minute 1, she has 4 minutes of uninterrupted access to steal company data before the cache expires. You must build a mechanism to propagate revocations instantly without bringing down the system.
-
-#### The Use Case: The Compromised Laptop
-
-**The Scenario:** Alice is a Workspace Admin. She leaves her laptop unlocked at a coffee shop, and a malicious actor sits down and starts exporting sensitive documents. The IT Security team detects anomalous behavior and clicks "Revoke All Access" in the Admin portal.
+**The Scenario:** Alice leaves her laptop unlocked at a coffee shop, and a hacker starts exporting sensitive documents. The IT Security team detects anomalous behavior and clicks "Revoke All Access." If Alice's `allow: true` decision is cached in the API for 5 more minutes, the hacker has 5 minutes of uninterrupted access.
 
 **How we engineer the Kill Switch:**
 
-1. **The Admin Action:** The IT Admin clicks "Revoke." The Control Plane updates Alice's status in the central Identity database to `Suspended`.
-2. **The Event Stream (Pub/Sub):** The Control Plane does not try to contact 5,000 individual APIs. Instead, it fires a "Hard Revocation" event into a high-throughput message broker (like Redis Pub/Sub, Kafka, or AWS SNS):
-`{ "action": "hard_revoke", "subject": "Alice", "timestamp": "1698230400" }`
-3. **The Sidecar Listener:** Every .NET API (PEP) has a background worker listening to this channel. Within milliseconds, the sidecar receives the event.
-4. **Targeted Eviction:** The API instantly purges *only* Alice's token and permission entries from its local memory cache.
-5. **The Block:** On the very next mouse click by the hacker, the API has no cached decision. It asks the Policy Engine. The Policy Engine sees the `Suspended` state in the database and returns `false`. The hacker is instantly hit with a `403 Forbidden`.
+1. **The Push-Based Pub/Sub Channel:** Do not rely on APIs to "poll" for changes. We deploy a high-throughput broker (Redis Pub/Sub or Kafka). When the Admin clicks Revoke, the central server broadcasts a targeted JSON event: `{ "action": "hard_revoke", "subject": "Alice" }`.
+2. **Targeted Eviction:** Every .NET API sidecar listens to this channel. Within milliseconds, the API instantly purges *only* Alice's token from its local cache. On the next mouse click, the API asks the Policy Engine, sees the suspended state, and returns `403 Forbidden`.
 
-**The Whiteboard Defense (The "Thundering Herd"):**
-An interviewer will ask: *"Why don't we just do Hard Revocations every time someone changes a minor permission?"*
-**Your Answer:** "If a company-wide policy changes, and we broadcast a global Hard Revocation, 5,000 APIs will instantly drop their caches. On the next millisecond, 50,000 user requests will hit those empty APIs, causing them to simultaneously query the backend Policy Engine. This is a classic 'Thundering Herd' failure that will instantly crash our database. For non-emergencies, we use **Soft Revocations**—the API marks the cache as stale, finishes serving the current request, and fetches the new rule asynchronously."
+#### The Whiteboard Defense: The "Thundering Herd"
 
----
+* **Q:** *Why not just broadcast a Hard Revocation every time a minor permission changes?*
+* **A:** "If a company-wide policy changes, and we broadcast a global Hard Revocation, 5,000 APIs will instantly drop their caches. On the next millisecond, 50,000 user requests will hit those empty APIs, causing them to simultaneously query the backend Policy Engine and databases. This is a classic **Thundering Herd** failure that will instantly crash our infrastructure."
 
-### Phase 7 Deep Dive: Multi-Tenant Isolation & Cross-Account Delegation
+**The Fix (Soft vs. Hard Revocation):**
 
-When building a B2B SaaS platform, you are hosting multiple competing companies (Tenants) on the same physical infrastructure. A data bleed between Tenant A (e.g., Coca-Cola) and Tenant B (e.g., Pepsi) is an extinction-level event for your platform.
-
-#### The Architect's Problem: The "Super Admin" Backdoor
-
-Startups often build their APIs by only checking if the user has an "Admin" role, completely forgetting to check the *boundary*. Furthermore, when a customer submits a support ticket, junior developers often hardcode a "Super Admin" role for internal support staff to bypass all security checks and look at the customer's data. This ruins compliance audits (SOC2/HIPAA) because there is no proof of who actually altered the data.
-
-#### The Use Case: The MSP Support Escalation
-
-**The Scenario:** "Startup Y" (Tenant A) is having an issue spinning up their GPUs. They open a critical support ticket with your Managed Service Provider (MSP) team. "Bob," an external Support Agent (Tenant B), needs to view Startup Y's workspace configurations to debug the issue without using a backdoor.
-
-**How we engineer Scoped Delegation (Assume Role):**
-
-1. **The Explicit Trust Policy:** In the Control Plane, the Administrator for Startup Y explicitly writes a policy: *"I trust Support Group B to have read-only access to my Workspace."*
-2. **The Request:** Bob (the Support Agent) clicks "Debug Workspace" in his portal. His application sends a request to your central **Security Token Service (STS)**, asking to "Assume a Role" in Startup Y's tenant.
-3. **The Minting:** The STS checks the trust policy. It sees the explicit approval. It mints a brand-new, temporary JWT for Bob.
-4. **The Constraints:** This new token is heavily scoped.
-* It is injected with Startup Y's `tenant_id` (so the APIs accept it).
-* It is hardcoded with a `read_only` scope (so Bob cannot accidentally delete the GPUs).
-* It has a strict Time-To-Live (expires in exactly 15 minutes).
-
-
-5. **The Audit Trail:** When Bob's API request hits the .NET controller, the logging middleware records both the `tenant_id` (Startup Y) and the `actor_id` (Bob from Tenant B).
-
-**The Whiteboard Defense (Dual-Layer Checking):**
-An interviewer will ask: *"How do you guarantee Bob doesn't query a different tenant's database?"*
-**Your Answer:** "End-to-End Tenant Partitioning. The `tenant_id` is a permanent claim inside the JWT. Before our Policy Engine even evaluates Bob's roles, it performs a mandatory boundary check: `if (jwt.tenant_id != requested_resource.tenant_id) return Deny`. Additionally, every caching layer and database query includes the Tenant ID as the partition key. It is mathematically impossible for an API request carrying Tenant A's token to read Tenant B's storage shards."
+* **Soft Revocation (Graceful Eviction):** For routine changes (e.g., user changes departments). We send a "Soft" signal. The API marks the cached entry as stale, finishes serving the current request, and fetches the new policy on the *next* request.
+* **Key Rotation Overlaps:** When rotating cryptographic signing keys, accept *both* the old and new key for a defined overlap window (e.g., 1 hour) using the token's `nbf` (Not Before) and `exp` claims so in-flight requests don't randomly fail.
 
 ---
 
-### Phase 8 Deep Dive: Machine-to-Machine (M2M) & Workload Identity
+### Phase 8: Multi-Tenant Isolation & Cross-Account Delegation
 
-Modern infrastructure is highly automated. AI Agents, Kubernetes cron jobs, and Serverless functions constantly talk to each other.
+Cloud IAM is fundamentally multi-tenant. Your architecture must have clear tenant partitioning, blast radius control, and scoped delegation.
 
-#### The Architect's Problem: Secret Sprawl
+#### End-to-End Tenant Partitioning
 
-Historically, developers created a "Service Account," generated a static `client_secret` (a long password), and injected it into the Kubernetes Pod as an environment variable.
+Data leaks happen when an API checks the *resource* but forgets to verify the *boundary*. The Identity Provider must inject a permanent `tenant_id` into the user's JWT. The PDP must enforce a dual-layer check:
 
-* Hackers dump environment variables.
-* Developers accidentally commit keys to source control.
-* Because rotating a static key causes downtime, IT teams simply *never* rotate them. You end up with 5-year-old API keys floating around production.
+1. *Tenant Check:* Does `jwt.tenant_id == resource.tenant_id`?
+2. *Resource Check:* Does the user have permission?
 
-#### The Use Case: The AI Agent & The Stripe API
+Furthermore, all Redis cache keys must be partitioned (e.g., `tenant_A:user_123_policy`) to prevent cross-contamination.
 
-**The Scenario:** You have a background AI Agent running in a Kubernetes Pod. Once a day, it calculates billing usage for the H100 GPUs and needs to call the external Stripe API to charge the customer's credit card.
+#### Control Plane vs. Data Plane
+
+* **Control Plane:** The UI/DB where admins write rules (low throughput, high consistency).
+* **Data Plane:** The fleet of sidecars evaluating requests (high throughput, eventual consistency).
+* **Noisy Neighbor Mitigation:** Apply strict, per-tenant rate limits. If Enterprise X runs heavy automation, dynamically route them to isolated sidecars so they don't crash the system for smaller customers.
+
+#### Use Case: The MSP Support Escalation (Assume Role)
+
+**The Scenario:** "Startup Y" (Tenant A) is having an issue spinning up GPUs. An external Support Agent, "Bob" (Tenant B), needs to view Startup Y's configurations. Beginners often hardcode a "Super Admin" backdoor for Bob, ruining SOC2 compliance.
+
+**How we engineer Scoped Delegation:**
+Similar to AWS STS (Security Token Service), we model this using explicit trust:
+
+1. **Explicit Trust:** Startup Y's admin explicitly writes a policy trusting Support Group B.
+2. **Role Assumption:** Bob requests a temporary token to "assume a role" in Startup Y's tenant.
+3. **Strict Scoping:** The STS mints a new JWT that is heavily restricted: It is **Time-Bounded** (expires in 15 mins) and **Resource-Bounded** (read-only).
+4. **Audit Trail:** Every action Bob takes is logged with both the `tenant_id` (Startup Y) and the `actor_id` (Bob), proving exactly who acted on the customer's behalf.
+
+---
+
+### Phase 9: Machine-to-Machine (The "Zero-Secret" Architecture)
+
+Humans make up less than 5% of traffic. The other 95% are Machines (AI agents, K8s pods, Serverless functions).
+
+#### The Problem: Secret Sprawl
+
+Generating static `client_secret` passwords for workloads leads to "Secret Sprawl." Keys are dumped from environment variables, committed to GitHub, and rarely rotated because doing so requires production downtime.
+
+Instead of passwords, we give workloads dynamically generated cryptographic identities based on their **provenance** (where they run).
+
+#### Use Case: The AI Agent & The Stripe API
+
+**The Scenario:** A background AI Agent running in a Kubernetes Pod needs to call the external Stripe API to charge a customer's credit card once a day.
 
 **How we engineer the Zero-Secret Architecture:**
 
-1. **Attested Identity (No Passwords):** We do not give the AI Agent a Stripe API key. When the AI Agent's Pod boots up, a local infrastructure sidecar (the SPIRE Node Agent) interrogates the Linux kernel. It checks the Process ID, the binary hash, and the Kubernetes Namespace.
-2. **The Short-Lived SVID:** Once the Node Agent mathematically proves *what* this workload is, it issues it a short-lived cryptographic certificate (an SVID) that expires in 5 minutes.
-3. **Workload Identity Federation (RFC 8693):** The AI Agent needs to call Stripe, but Stripe doesn't understand internal certificates.
-* The AI Agent sends its short-lived Kubernetes token to your central **Security Token Service (STS)**.
-* The STS acts as a translator. It validates the Kubernetes token, then reaches into its secure vault, pulls out the highly-guarded Stripe API key, and mints a short-lived, custom Access Token specifically bound for the Stripe `audience`.
-
-
-4. **The Sidecar Handoff:** To keep the .NET code clean, an Envoy Sidecar intercepts the AI Agent's outbound HTTP call, automatically attaches this newly minted token, and forwards it to Stripe.
-
-**The Whiteboard Defense:**
-An interviewer will ask: *"What if a hacker breaches the Kubernetes Pod and steals that token from memory?"*
-**Your Answer:** "By utilizing Workload Identity Federation, we completely eliminate static secrets from the application space. If a hacker dumps the memory, they get a token that expires in under 5 minutes. Furthermore, the STS scopes that token strictly to the Stripe API audience and the Pod's specific IP CIDR block. If the hacker attempts to exfiltrate that token and use it from their own machine, the network boundary check fails, and the token is useless."
-
----
+1. **Attested Identity (SPIFFE/SPIRE) & mTLS:** We do not give the AI Agent a Stripe API key. When the AI Agent boots up, a local Node Agent interrogates the kernel (checking the process ID and K8s namespace). Once verified, it issues a short-lived (5-minute) certificate over a local Unix socket. The workload uses this to establish Mutual TLS (mTLS) with internal services.
+2. **Token Exchange (RFC 8693 Federation):** The AI Agent needs to call Stripe, but Stripe doesn't accept internal certificates. The AI Agent sends its short-lived Kubernetes JWT to a central **Security Token Service (STS)**. The STS validates the K8s signature, pulls the highly-guarded Stripe API key from its vault, and mints a short-lived Access Token bound specifically for the Stripe `audience`.
+3. **The Sidecar Pattern:** To keep your .NET code clean, an Envoy Sidecar intercepts the AI Agent's outbound HTTP call, automatically attaches this STS token, and forwards it to Stripe.
+4. **Blast Radius Constraints:** If a hacker dumps the memory and steals the token, it is completely useless. It expires in 5 minutes, and the STS scoped the token strictly to the Pod's specific IP CIDR block. A network boundary check will block any external use of that token.
