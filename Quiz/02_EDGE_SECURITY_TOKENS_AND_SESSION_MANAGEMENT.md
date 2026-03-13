@@ -67,6 +67,48 @@ Let's trace exactly how identity flows securely from the client, through the edg
 
 To do this accurately, we must answer a critical question: **Who actually creates the Opaque Token?** The answer changes entirely depending on whether Alice is using a Web Browser (React) or a Mobile App (iOS/Android). We use a different pattern for each to achieve the exact same goal: protecting the internal JWT.
 
+### Clarification 1: How do you force Auth0 to generate an Opaque Token?
+
+In OAuth 2.0, an Identity Provider (like Auth0) can issue two types of Access Tokens: **Value Tokens** (JWTs containing actual data) or **Reference Tokens** (Opaque strings that act as pointers).
+
+**The Auth0 Trigger:**
+In Auth0, the format of the token is controlled entirely by the `audience` parameter in your initial login request.
+
+1. **To get a JWT:** If your mobile app requests a specific custom API (e.g., `audience=https://api.yourstore.com`), Auth0 defaults to issuing a rich, signed **JWT**.
+2. **To get an Opaque Token:** If your mobile app omits the `audience` parameter, or passes the default Auth0 `/userinfo` endpoint as the audience, Auth0 automatically issues an **Opaque Token** (a random string like `ref_opaque_token`).
+
+*Alternatively, in many enterprise Identity Providers (like Duende IdentityServer or Okta), there is a literal toggle switch in the dashboard for your specific Mobile Client that says: `Access Token Type: [JWT / Reference]`. You simply select "Reference" to force the opaque token pattern.*
+
+---
+
+### Clarification 2: Does every API call have to go back to Auth0?
+
+You spotted the exact vulnerability in the Phantom Token Pattern.
+
+When the Mobile App sends `Authorization: Bearer ref_opaque_token` to your API Gateway, the Gateway cannot read it. It **must** ask Auth0 what the token means using a standard endpoint called **Token Introspection (RFC 7662)**.
+
+If your user makes 50 API calls in one minute, and your Gateway makes 50 HTTP requests back to Auth0 to translate `ref_opaque_token`, you will add massive network latency to your app and likely hit Auth0's rate limits.
+
+**The Solution: Gateway Caching & Self-Signing**
+
+To fix this, the API Gateway does not ask Auth0 every single time. It uses a high-speed local cache (like Redis) and **mints its own internal JWTs**.
+
+Here is exactly how the translation mechanics work on the Gateway:
+
+1. **The First Request (The Cache Miss):** Alice opens the mobile app and makes her first request (`GET /orders`). The Gateway sees the opaque token `ref_opaque_token`. It checks its local Redis cache. Nothing is there.
+2. **The Introspection:** The Gateway pauses the request and calls Auth0: `POST /introspect (token=ref_opaque_token)`.
+3. **The JSON Payload:** Auth0 looks up the token in its database and replies with a plain JSON object containing the claims: `{"active": true, "sub": "alice123", "email": "alice@email.com", "roles": ["shopper"]}`.
+4. **Minting the Internal JWT:** The API Gateway takes that JSON payload and generates a brand-new **Internal JWT**. It signs this new JWT using its *own* internal private key.
+5. **The Cache (The Secret Sauce):** The Gateway saves a mapping in Redis: `"ref_opaque_token" = [The New Internal JWT]`. It sets this cache to expire in a short window (e.g., 5 minutes).
+6. **The Handoff:** The Gateway forwards the request to the Order Microservice, attaching the new internal JWT.
+
+**The Subsequent Requests (The Fast Path):**
+When Alice clicks another button 10 seconds later, the Mobile App sends `ref_opaque_token` again.
+
+1. The Gateway checks Redis.
+2. It instantly finds the mapped Internal JWT.
+3. It forwards the request to the microservices in less than 1 millisecond. **It does not talk to Auth0.**
+
 #### Scenario A: The Web Browser Checkout (The BFF Pattern)
 
 When Alice shops on a web browser, the Identity Provider (Auth0) does **not** create the opaque token. The Backend-for-Frontend (BFF) does.
@@ -75,33 +117,30 @@ In this flow, the BFF acts as a protective shield. It gets the real JWT from Aut
 
 **The Flow:** Alice clicks "Buy Now." The browser makes an API call using the `HttpOnly` cookie.
 
+For web browsers, the BFF creates the opaque reference (the session cookie) and handles the token translation *before* it even hits the API Gateway.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Browser as Alice's Browser (React)
-    participant BFF as BFF Server (Node/.NET)
-    participant IDP as Identity Provider (Auth0)
+    participant Browser as React App
+    participant BFF as BFF Server
+    participant IDP as Auth0
     participant Gateway as API Gateway
     participant Order as Order Microservice
 
-    Note over Browser: Flow 1: Alice logs in
+    Note over Browser,BFF: Flow 1: Login
     Browser->>BFF: 1. POST /login (Credentials)
-    BFF->>IDP: 2. Confidential authentication request
+    BFF->>IDP: 2. Authenticate
+    IDP-->>BFF: 3. Returns REAL signed JWTs
     
-    Note over IDP,BFF: Auth0 issues the REAL JWTs to the Backend
-    IDP-->>BFF: 3. Returns signed JWT (ID Token & Access Token)
+    BFF->>BFF: 4. Store JWT in Redis. Generate `session_cookie_id`
+    BFF-->>Browser: 5. Set-Cookie: `Session=session_cookie_id` (HttpOnly)
     
-    Note over BFF: Defense: Hide token from JavaScript
-    BFF->>BFF: 4. Store real JWT in Redis. Generate Opaque Session ID ("abc123").
-    BFF-->>Browser: 5. Returns Encrypted HttpOnly Cookie (Session=abc123)
+    Note over Browser,Gateway: Flow 2: API Call
+    Browser->>BFF: 6. POST /checkout (Auto-includes Cookie)
+    BFF->>BFF: 7. Look up `session_cookie_id` in Redis -> Get REAL JWT
     
-    Note over Browser: Flow 2: Alice clicks "Buy Now"
-    Browser->>BFF: 6. POST /checkout (Auto-includes HttpOnly Cookie)
-    
-    Note over BFF: JavaScript cannot steal this cookie via XSS.
-    BFF->>BFF: 7. Intercept request, validate cookie, retrieve real JWT from Redis
-    
-    BFF->>Gateway: 8. Forward /checkout with Header: `Authorization: Bearer [Real_JWT]`
+    BFF->>Gateway: 8. Forward /checkout + Header: `Bearer [REAL JWT]`
     Gateway->>Order: 9. Route to internal microservice
 
 ```
@@ -116,31 +155,39 @@ Auth0 is specifically configured to issue a random, opaque string to public mobi
 
 **The Flow:** Alice clicks "Buy Now" on her phone. The app sends the Opaque Access Token.
 
+For mobile apps, Auth0 creates the opaque reference. The API Gateway is responsible for intercepting it, translating it, and caching the result.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Mobile as Alice's Mobile App
-    participant IDP as Identity Provider (Auth0)
-    participant Gateway as API Gateway (Edge PEP)
+    participant Mobile as Mobile App
+    participant IDP as Auth0
+    participant Gateway as API Gateway
+    participant Cache as Redis (Gateway Cache)
     participant Order as Order Microservice
 
-    Note over Mobile: Flow 1: Alice logs in
-    Mobile->>IDP: 1. Authentication Request (PKCE Flow)
+    Note over Mobile,IDP: Flow 1: Login (No Audience Parameter)
+    Mobile->>IDP: 1. Login Request 
+    IDP-->>Mobile: 2. Returns Opaque Token `ref_opaque_token`
     
-    Note over IDP,Mobile: Auth0 issues an OPAQUE string, not a JWT
-    IDP-->>Mobile: 2. Returns Opaque Access Token ("xyz789")
+    Note over Mobile,Gateway: Flow 2: First API Call (Cache Miss)
+    Mobile->>Gateway: 3. POST /checkout (Bearer `ref_opaque_token`)
+    Gateway->>Cache: 4. Check Cache for `ref_opaque_token` (Not Found)
     
-    Note over Mobile: Flow 2: Alice clicks "Buy Now"
-    Mobile->>Gateway: 3. POST /checkout (Header: `Authorization: Bearer xyz789`)
+    Gateway->>IDP: 5. POST /introspect token=`ref_opaque_token`
+    IDP-->>Gateway: 6. Returns JSON: {"active": true, "sub": "Alice"}
     
-    Note over Gateway: Defense: Revocation Check & Translation (Phantom Token)
-    Gateway->>IDP: 4. POST /introspect (What does "xyz789" mean?)
+    Note over Gateway: Gateway mints a new internal signed JWT
+    Gateway->>Cache: 7. Save mapping: `ref_opaque_token` -> [Internal JWT] (TTL: 5 mins)
     
-    Note over IDP: If token is revoked, IDP returns "Active: false" here.
-    IDP-->>Gateway: 5. Active: true. Returns rich JSON data (sub: Alice, scope: buy)
+    Gateway->>Order: 8. Forward POST /checkout + [Internal JWT]
     
-    Gateway->>Gateway: 6. Gateway mints a new internal signed JWT using that data
-    Gateway->>Order: 7. Forward /checkout + Internal JWT
+    Note over Mobile,Gateway: Flow 3: Second API Call (Cache Hit)
+    Mobile->>Gateway: 9. GET /orders (Bearer `ref_opaque_token`)
+    Gateway->>Cache: 10. Check Cache for `ref_opaque_token` (Found!)
+    Cache-->>Gateway: 11. Returns [Internal JWT] instantly
+    
+    Gateway->>Order: 12. Forward GET /orders + [Internal JWT]
 
 ```
 
@@ -149,6 +196,12 @@ sequenceDiagram
 By utilizing the BFF pattern for web browsers and the Phantom Token pattern with Opaque tokens for mobile apps at the edge, you have successfully protected the user's session from client-side theft.
 
 In both scenarios, the outside world only ever handles meaningless, opaque strings, while providing your internal microservices with the rich, stateless JWTs they need to operate quickly.
+
+**Why this is perfectly balanced:**
+
+* **Security:** The public client (browser or mobile) only ever sees a meaningless reference string (`session_cookie_id` or `ref_opaque_token`).
+* **Revocation:** If Alice is hacked, Auth0 revokes the token. At most, the hacker has a 5-minute window before the Gateway's Redis cache expires, forcing a new `/introspect` call that will return `{"active": false}`, permanently locking the hacker out at the Gateway.
+* **Performance:** 99% of Mobile API requests never hit Auth0. They hit the blazing-fast Redis cache on the Gateway, grabbing the internal JWT and keeping microservice latency near zero.
 
 ---
 #### Pattern B: Internal Propagation & Token Exchange (RFC 8693)
