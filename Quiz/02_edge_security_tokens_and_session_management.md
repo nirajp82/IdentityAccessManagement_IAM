@@ -531,3 +531,70 @@ public class TokenForwardingHandler : DelegatingHandler
 By combining the **Sidecar Pattern** (for Security) with **Polly** (for Resiliency), you have engineered a nearly indestructible microservice.
 
 ---
+
+## 5. The Token Revocation Problem (The Lambda Scenario)
+
+**The Scenario:** A compromised user is downloading terabytes of proprietary AI training data. The admin deletes their account, but their session token is still valid for 55 minutes. How do you stop them instantly?
+
+If JWT validation is perfectly stateless, the microservices don't know the user was deleted. They just see a mathematically valid signature and let the download continue. **Pure statelessness is a myth in high-security systems.**
+
+### The Fix: The Stateful Edge (Redis Blocklist)
+
+To solve this, we push state to the Edge API Gateway.
+
+1. When the admin hits "Delete User," an event is fired.
+2. The user's ID (the `sub` claim) is immediately injected into a high-speed Redis blocklist at the API Gateway.
+3. Every time a request hits the Gateway, the Gateway checks Redis *before* validating the JWT.
+
+**Node.js / Express API Gateway Implementation:**
+
+```javascript
+const express = require('express');
+const redis = require('redis');
+const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
+
+const app = express();
+const redisClient = redis.createClient({ url: 'redis://localhost:6379' });
+
+// Setup JWKS client to fetch public keys for Asymmetric Signature validation
+const client = jwksClient({ jwksUri: 'https://api.yourdomain.com/.well-known/jwks.json' });
+
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, (err, key) => {
+    callback(null, key.publicKey || key.rsaPublicKey);
+  });
+}
+
+// Gateway Authentication Middleware
+async function gatewayAuth(req, res, next) {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).send("No token");
+
+    // Decode token without validating signature (yet) to get the user ID
+    const decoded = jwt.decode(token);
+    const userId = decoded.sub;
+
+    // 1. STATEFUL REVOCATION CHECK (The Lambda Scenario Fix)
+    // Query Redis to see if this user was instantly blocked
+    const isRevoked = await redisClient.get(`blocklist:${userId}`);
+    if (isRevoked) {
+        return res.status(401).send("Session Revoked Internally.");
+    }
+
+    // 2. STATELESS ASYMMETRIC CRYPTOGRAPHY CHECK (RS256 & JWKS)
+    // If not on blocklist, verify the RS256 mathematical signature using the Public Key
+    jwt.verify(token, getKey, { algorithms: ['RS256'] }, (err, verifiedToken) => {
+        if (err) return res.status(401).send("Invalid Signature");
+        
+        req.user = verifiedToken;
+        next(); // Route to internal microservice
+    });
+}
+
+app.use('/ai-data', gatewayAuth, proxyToAiMicroservice);
+
+```
+
+---
+
