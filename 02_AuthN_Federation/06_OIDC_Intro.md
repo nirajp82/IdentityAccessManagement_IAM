@@ -490,7 +490,171 @@ if (payload.Nonce != expectedNonce)
 
 ```
 ---
-## 9. Implementation: Validating the Token & Issuing Your App Session
+
+
+## 9. The Frontend Storage Problem (Defending Against Token Theft)
+
+By using OIDC, PKCE, and Nonces, we have securely proven John’s identity and successfully delivered a token to the React app. But now we face a massive frontend vulnerability: **Where does React store that token?**
+
+### The Problem: The "Bearer" Vulnerability & XSS
+
+If your React app stores the Access Token or ID Token in `localStorage` or standard `sessionStorage`, it is acting as a simple **Bearer Token** (like a $100 bill). Whoever holds it, can spend it.
+
+If your application has a single Cross-Site Scripting (XSS) vulnerability (e.g., a malicious script injected via a third-party NPM package or a poorly sanitized comment section), the attacker’s JavaScript can:
+
+1. Silently read the token from `localStorage`.
+2. Send the token back to the attacker's server.
+3. The attacker can now open Postman, attach the token to the header, and drain the user's account. Because standard Bearer tokens have no device-binding, your .NET API cannot tell the difference between John's React app and the attacker's laptop.
+
+To prevent this, we must ensure the token cannot be stolen, or if it is stolen, that it is useless.
+
+---
+
+### Solution A: The Backend-for-Frontend (BFF) & `HttpOnly` Cookies (Recommended)
+
+The absolute most secure way to protect a token in a web browser is to **never let the browser's JavaScript touch it.** We do this using the Backend-for-Frontend (BFF) pattern.
+
+Instead of React making the OIDC calls to Google, a dedicated lightweight backend (or your .NET API acting as the BFF) handles the exchange.
+
+#### How the BFF Flow Works:
+
+1. React redirects the user to the BFF to log in.
+2. The BFF completes the OIDC flow with Google and receives the tokens.
+3. The BFF stores the tokens securely in backend memory or a Redis cache.
+4. The BFF generates an encrypted, randomized session ID and sends it to the React app as an **`HttpOnly` Cookie**.
+5. When React calls the API, the browser automatically attaches the cookie. The BFF intercepts the cookie, looks up the real token in Redis, and forwards it to the microservices.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant React as React App
+    participant BFF as .NET BFF (Backend)
+    participant Google as Google OIDC
+    participant API as Internal Microservices
+
+    React->>BFF: 1. User clicks login, redirects to BFF
+    BFF->>Google: 2. BFF initiates OIDC flow
+    Google-->>BFF: 3. Returns ID Token & Access Token
+    
+    Note over BFF: BFF hides tokens in backend memory/Redis
+    BFF-->>React: 4. Returns `HttpOnly` Session Cookie (SessionID=123)
+    
+    Note over React: XSS attacks CANNOT read HttpOnly cookies.
+    React->>BFF: 5. GET /data (Browser auto-attaches Cookie)
+    
+    BFF->>BFF: 6. Decrypt cookie, retrieve real Token from memory
+    BFF->>API: 7. Forward request to internal API with real Token
+
+```
+
+#### Code Implementation: Setting the `HttpOnly` Cookie in .NET
+
+In your .NET controller, instead of returning a JSON response containing the token, you append it as an impenetrable cookie.
+
+```csharp
+// Inside your .NET Login Controller
+var cookieOptions = new CookieOptions
+{
+    HttpOnly = true, // JavaScript CANNOT read this
+    Secure = true,   // Only sent over HTTPS
+    SameSite = SameSiteMode.Strict, // Prevents CSRF attacks
+    Expires = DateTime.UtcNow.AddHours(2)
+};
+
+// Send a session ID (or an encrypted token) to the browser
+Response.Cookies.Append("AuthSession", "encrypted_session_id_here", cookieOptions);
+
+return Ok(new { Message = "Logged in successfully" });
+
+```
+
+---
+
+### Solution B: Demonstrating Proof-of-Possession (DPoP)
+
+**When to use it:** If you have a purely static SPA (no backend server to act as a BFF) or a Mobile App, you cannot use cookies. You *must* hold the token in the client. To secure it, we use **DPoP**.
+
+DPoP binds the token cryptographically to the user's specific browser tab. It turns the token from a generic $100 bill into a personalized credit card that requires a signature for every swipe.
+
+#### How DPoP Works:
+
+1. **The Keys:** Before logging in, React uses the browser's `window.crypto` API to generate a Public/Private key pair. The Private key is flagged as non-extractable (malicious JS cannot steal it).
+2. **The Binding:** React sends the Public Key to the Auth Server during login. The Auth Server stamps the token with the fingerprint of that Public Key.
+3. **The Proof:** Every time React makes an API request, it uses the hidden Private Key to sign a temporary "Proof" (a tiny JWT containing the URL and HTTP method).
+4. **The Check:** The .NET API verifies that the signature on the Proof matches the Public Key stamped inside the token.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant React as React App
+    participant IDP as Auth Server
+    participant API as .NET API
+
+    Note over React: 1. Generate Public/Private Key in browser memory
+    React->>IDP: 2. Login request + Public Key
+    IDP-->>React: 3. Returns Token (Stamped with Public Key fingerprint)
+    
+    Note over React: React needs to call the API. It creates a DPoP Signature.
+    React->>API: 4. GET /orders <br/>Header: `Authorization: DPoP token123` <br/>Header: `DPoP: [Cryptographic Signature]`
+    
+    Note over API: API verifies the signature using the Public Key.
+    alt Signature Matches Token Fingerprint
+        API-->>React: 200 OK
+    else Hacker sends stolen token without Private Key signature
+        API-->>Hacker: 401 Unauthorized (Stolen Token Rejected)
+    end
+
+```
+
+#### Code Implementation: Generating the DPoP Proof in React
+
+React uses the native Web Crypto API to sign the request right before sending it to the .NET API.
+
+```javascript
+// 1. Generate keys (Run once on startup)
+const keyPair = await window.crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false, // false = Private key CANNOT be extracted by XSS!
+    ["sign", "verify"]
+);
+
+// 2. Function to generate the DPoP Proof before a fetch() call
+async function generateDpopProof(url, method) {
+    const header = { typ: "dpop+jwt", alg: "ES256" };
+    const payload = {
+        htm: method,       // e.g., "GET"
+        htu: url,          // e.g., "https://api.myapp.com/orders"
+        iat: Math.floor(Date.now() / 1000),
+        jti: generateRandomString() // Unique ID for this specific request
+    };
+
+    // Encode and sign the payload using the un-extractable Private Key
+    const encodedData = encodeJwt(header, payload); 
+    const signature = await window.crypto.subtle.sign(
+        { name: "ECDSA", hash: { name: "SHA-256" } },
+        keyPair.privateKey,
+        new TextEncoder().encode(encodedData)
+    );
+
+    return `${encodedData}.${base64UrlEncode(signature)}`;
+}
+
+// 3. Making the secure API call
+const dpopProof = await generateDpopProof('https://api.myapp.com/orders', 'GET');
+
+fetch('https://api.myapp.com/orders', {
+    method: 'GET',
+    headers: {
+        'Authorization': `DPoP ${accessToken}`,
+        'DPoP': dpopProof // The .NET API will verify this signature!
+    }
+});
+
+```
+
+**Summary:** If a hacker uses XSS to steal the `accessToken` from React's memory, the token is utterly useless. When the hacker attempts to use it from their own computer, they cannot generate the `DPoP` signature header because the `keyPair.privateKey` never left the victim's browser.
+---
+## 10. Implementation: Validating the Token & Issuing Your App Session
 
 Once your React app (or your backend) finishes the flow, you are left holding a **Google ID Token**. You must prove it is real, and then use it to log the user into your .NET API by issuing an internal Application Token.
 
