@@ -874,9 +874,52 @@ Here is the detailed architectural breakdown.
 
 > **A:** It comes down to "Value" vs. "Reference."
 > * **JSON Web Token (JWT) [Value Token]:** A JWT actually *contains* the data. It is a Base64-encoded JSON object that holds claims (like `user_id`, `email`, `role: admin`). Because the data is baked into the token and cryptographically signed, the receiving service doesn't need to ask a database what the token means. It is self-contained.
+> * - OIDC requires JWT for the ID Token.
+>   - OAuth 2.0 usually uses JWT for the Access Token because it is efficient, but it isn't strictly forced by the original 2012 specification.
+>   - 
 > * **Opaque Token [Reference Token]:** An opaque token is just a random, meaningless string of characters (e.g., `xyz_98765`). It contains zero data. It acts merely as a pointer or a key to a database record. To understand what an opaque token means, a service *must* make a network call to the Identity Provider to look it up.
 > 
-> 
+### 2. Comparison: Opaque vs. JWT
+
+| Feature | **Opaque Token** | **JWT (JSON Web Token)** |
+| --- | --- | --- |
+| **Contents** | Random string (No data inside). | Base64 encoded JSON (Data inside). |
+| **Validation** | Requires a network call to the STS (**Introspection**). | Can be validated locally (offline) by the API. |
+| **Revocation** | **Instant.** If you delete it from the STS DB, it stops working. | **Hard.** It's valid until it expires (unless you use a "Blacklist"). |
+| **Size** | Very small. | Large (grows with more permissions). |
+| **Confused Deputy** | Lower risk (The token is useless if stolen). | Higher risk (The token carries its own power). |
+| **Security Level** | **Higher.** Sensitive claims never leave the server-side memory of the STS. | **Lower.** Claims are "in flight" and visible to anyone who can see the network traffic. |
+| **Performance** | **Slower.** Every API call requires an extra network hop to the STS. | **Faster.** The API validates the token using its own CPU (no network call needed). |
+| **Best Use Case** | **Public Clients.** Use for Browser/Mobile apps where you don't trust the client. | **Microservices.** Use for internal service-to-service calls where speed is king. |
+
+---
+
+## Why choose one over the other?
+
+### Use Opaque Tokens if:
+
+1. **Immediate Security is Critical:** If a user logs out or is banned, you need their access to stop **the exact second** you click "Delete."
+2. **Privacy:** You want to hide internal IDs or roles from being discovered by anyone decoding a JWT on the frontend.
+3. **Low Storage:** You are worried about the size of HTTP headers (JWTs can get quite large if they contain many claims).
+
+### Use JWTs if:
+
+1. **High Scalability:** You have millions of requests and don't want your **STS** to become a bottleneck (since the API doesn't have to "ask" the STS if the token is good).
+2. **Disconnected Systems:** You have services running in different environments where they might not always have a fast connection back to the central STS.
+3. **Standardization:** You are building a public-facing API that other developers will consume, as JWT is the industry standard for interoperability.
+
+---
+
+## The "Pro" Move: The Phantom Token Pattern
+
+In a high-grade .NET architecture, we often use **both**.
+
+1. The **Public App** gets an **Opaque Token** (high security).
+2. The **API Gateway** receives the Opaque Token, calls the STS once to validate it, and then **exchanges** it for a **JWT**.
+3. The **Internal Microservices** only see the **JWT** (high speed).
+
+This gives you the **Instant Revocation** of an Opaque token at the front door, and the **Performance** of a JWT in the back office.
+
 
 **Q: Why shouldn't we just send a JWT directly to the user's browser or mobile app?**
 
