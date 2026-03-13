@@ -1,4 +1,4 @@
-# 🧠 Day 2: Advanced Authorization (The Policy Engine)
+# 🧠 Day 3: Advanced Authorization (The Policy Engine)
 
 If Authentication (AuthN) is the security guard checking your ID badge at the front door, Authorization (AuthZ) is the magnetic card reader on every single door inside the building.
 
