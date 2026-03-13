@@ -585,7 +585,15 @@ public class TokenExchangeService : ITokenExchangeService {
 
 ---
 
-## Why this solves Socket Exhaustion?
+#### Summary of the Flow
+- Request In: A user calls your API with a "Wide" JWT.
+- App Logic: You call _shippingClient.CreateShipmentAsync(order).
+- Interceptor: The TokenExchangeHandler pauses the request.
+- Exchange: It checks the IMemoryCache. If empty, it calls the STSClient (via IHttpClientFactory) to get a "Narrow" token.
+- Request Out: The ShippingClient sends the request to the Shipping API with the new, safe token.
+- Would you like me to explain how to handle "Token Expiry" if the STS token becomes invalid before your cache expires
+
+#### Why this solves Socket Exhaustion?
 
 1. **Reuse:** Instead of opening and closing a new connection for every request, `IHttpClientFactory` keeps a pool of connections open to the Shipping API and the STS.
 2. **Cleanup:** When a connection gets old or stale, the Factory cleans it up properly in the background, something that manual `new HttpClient()` often fails to do.
