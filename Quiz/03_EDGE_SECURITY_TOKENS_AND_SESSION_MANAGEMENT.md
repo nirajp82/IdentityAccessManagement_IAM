@@ -61,48 +61,95 @@ Let's assume the absolute worst-case scenario: you don't have DPoP configured, t
 * **The Block:** If your security systems detect anomalous behavior (e.g., Alice's token is suddenly being used from a foreign country), the Identity Server flags the opaque token as "Revoked." The very next time the hacker tries to use it, the Gateway asks for the translation, the server replies "Revoked," and the Gateway instantly stops translating it. The hacker is permanently locked out at the Edge.
 
 ---
-
 ### 3. The Use Case: The Secure E-Commerce Checkout Flow
 
-Let's trace exactly how identity flows securely from the browser, through the BFF, and into the internal network using these blended defenses.
+Let's trace exactly how identity flows securely from the client, through the edge, and into the internal network.
 
-**The Scenario:** Alice clicks "Buy Now." The browser makes an API call using the `HttpOnly` cookie.
+To do this accurately, we must answer a critical question: **Who actually creates the Opaque Token?** The answer changes entirely depending on whether Alice is using a Web Browser (React) or a Mobile App (iOS/Android). We use a different pattern for each to achieve the exact same goal: protecting the internal JWT.
+
+#### Scenario A: The Web Browser Checkout (The BFF Pattern)
+
+When Alice shops on a web browser, the Identity Provider (Auth0) does **not** create the opaque token. The Backend-for-Frontend (BFF) does.
+
+In this flow, the BFF acts as a protective shield. It gets the real JWT from Auth0, locks it in a secure backend database (like Redis), and generates a meaningless "Session ID" to give to the browser as an `HttpOnly` cookie. To the browser, this cookie is completely opaque.
+
+**The Flow:** Alice clicks "Buy Now." The browser makes an API call using the `HttpOnly` cookie.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Browser as Alice's Browser (React)
-    participant BFF as BFF Server (Node/Go)
+    participant BFF as BFF Server (Node/.NET)
     participant IDP as Identity Provider (Auth0)
-    participant Gateway as API Gateway (Edge PEP)
+    participant Gateway as API Gateway
     participant Order as Order Microservice
 
     Note over Browser: Flow 1: Alice logs in
     Browser->>BFF: 1. POST /login (Credentials)
     BFF->>IDP: 2. Confidential authentication request
-    IDP-->>BFF: 3. Returns Opaque Token "xyz789" (The Phantom Token)
     
-    Note over BFF: Defense 1: Hide token from JavaScript
-    Note over BFF: BFF session state: Stores "xyz789"
-    BFF-->>Browser: 4. Returns Encrypted HttpOnly Cookie
+    Note over IDP,BFF: Auth0 issues the REAL JWTs to the Backend
+    IDP-->>BFF: 3. Returns signed JWT (ID Token & Access Token)
+    
+    Note over BFF: Defense: Hide token from JavaScript
+    BFF->>BFF: 4. Store real JWT in Redis. Generate Opaque Session ID ("abc123").
+    BFF-->>Browser: 5. Returns Encrypted HttpOnly Cookie (Session=abc123)
     
     Note over Browser: Flow 2: Alice clicks "Buy Now"
-    Browser->>BFF: 5. POST /checkout (Auto-includes HttpOnly Cookie)
+    Browser->>BFF: 6. POST /checkout (Auto-includes HttpOnly Cookie)
     
     Note over BFF: JavaScript cannot steal this cookie via XSS.
-    BFF->>BFF: 6. Intercept request, validate cookie, retrieve "xyz789"
+    BFF->>BFF: 7. Intercept request, validate cookie, retrieve real JWT from Redis
     
-    BFF->>Gateway: 7. Forward /checkout with Header: `Authorization: Bearer xyz789`
-    
-    Note over Gateway: Defense 3: Revocation Check & Translation
-    Gateway->>IDP: 8. Introspect Opaque Token "xyz789"
-    IDP-->>Gateway: 9. Token is valid. Returns rich signed JWT (sub: Alice)
-    
-    Gateway->>Order: 10. Forward checkout + internal JWT
+    BFF->>Gateway: 8. Forward /checkout with Header: `Authorization: Bearer [Real_JWT]`
+    Gateway->>Order: 9. Route to internal microservice
 
 ```
 
-By utilizing the BFF pattern and opaque tokens at the edge, you have successfully protected the user's session from browser theft, while still providing your internal microservices with the rich, stateless JWTs they need to operate quickly.
+#### Scenario B: The Mobile App Checkout (The True Phantom Token Pattern)
+
+Mobile apps generally do not use cookies. They must store the token in local secure storage (like the iOS Keychain) and send it manually as a standard HTTP header. Because the token lives directly on a public device, we cannot send the real JWT.
+
+In this scenario, **the Identity Provider (Auth0) creates the opaque token.**
+
+Auth0 is specifically configured to issue a random, opaque string to public mobile clients. When the mobile app calls the API Gateway, the Gateway must pause the request and ask Auth0 to translate it.
+
+**The Flow:** Alice clicks "Buy Now" on her phone. The app sends the Opaque Access Token.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Mobile as Alice's Mobile App
+    participant IDP as Identity Provider (Auth0)
+    participant Gateway as API Gateway (Edge PEP)
+    participant Order as Order Microservice
+
+    Note over Mobile: Flow 1: Alice logs in
+    Mobile->>IDP: 1. Authentication Request (PKCE Flow)
+    
+    Note over IDP,Mobile: Auth0 issues an OPAQUE string, not a JWT
+    IDP-->>Mobile: 2. Returns Opaque Access Token ("xyz789")
+    
+    Note over Mobile: Flow 2: Alice clicks "Buy Now"
+    Mobile->>Gateway: 3. POST /checkout (Header: `Authorization: Bearer xyz789`)
+    
+    Note over Gateway: Defense: Revocation Check & Translation (Phantom Token)
+    Gateway->>IDP: 4. POST /introspect (What does "xyz789" mean?)
+    
+    Note over IDP: If token is revoked, IDP returns "Active: false" here.
+    IDP-->>Gateway: 5. Active: true. Returns rich JSON data (sub: Alice, scope: buy)
+    
+    Gateway->>Gateway: 6. Gateway mints a new internal signed JWT using that data
+    Gateway->>Order: 7. Forward /checkout + Internal JWT
+
+```
+
+#### The Ultimate Result
+
+By utilizing the BFF pattern for web browsers and the Phantom Token pattern with Opaque tokens for mobile apps at the edge, you have successfully protected the user's session from client-side theft.
+
+In both scenarios, the outside world only ever handles meaningless, opaque strings, while providing your internal microservices with the rich, stateless JWTs they need to operate quickly.
+
 ---
 #### Pattern B: Internal Propagation & Token Exchange (RFC 8693)
 
