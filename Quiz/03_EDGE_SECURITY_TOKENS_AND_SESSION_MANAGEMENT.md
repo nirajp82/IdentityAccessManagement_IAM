@@ -10,7 +10,7 @@ To move identity securely through a distributed system, we divide the architectu
 
 ### 2. Best Practices
 
-Junior developers usually take the JWT issued by Auth0, send it directly to the user's browser, and then have the browser send that same JWT down through every microservice. **This is a massive security risk.** Here is how Staff Architects engineer the flow.
+Junior developers usually take the JWT issued by Auth0, send it directly to the user's browser, and then have the browser send that same JWT down through every microservice. **This is a massive security risk.** Here is how we engineer the flow.
 
 #### Pattern A: The Phantom Token Pattern (Protecting the Edge)
 
@@ -35,7 +35,7 @@ So the Gateway passed the JWT to `Service A`. Now `Service A` needs to call `Ser
 
 If internal JWTs are stateless and live for 15 minutes, how do you instantly kick a hacker out of the system?
 
-* **The Fix:** Do not rely on Token Expiration for critical security. Architects implement the **Continuous Access Evaluation Protocol (CAEP)**.
+* **The Fix:** Do not rely on Token Expiration for critical security. We implement the **Continuous Access Evaluation Protocol (CAEP)**.
 * **How it works:** The Edge API Gateway subscribes to an asynchronous event stream (Pub/Sub). If the Identity Provider detects a compromised password or a risky IP address change, it fires a CAEP event. The API Gateway instantly drops the user's session at the Edge, physically preventing any further requests from ever reaching the internal JWT-based microservices.
 
 ---
@@ -77,7 +77,7 @@ sequenceDiagram
 
 ```
 
-### The Whiteboard FAQ (The Architect's Defense)
+### The Whiteboard FAQ (The Defense)
 
 If you are designing this on a whiteboard, interviewers will challenge you on these points:
 
@@ -88,5 +88,3 @@ If you are designing this on a whiteboard, interviewers will challenge you on th
 **Q: What is the risk of simply passing the original JWT all the way down the call chain?**
 
 > **A:** A Confused Deputy attack and privilege escalation. If the Edge Gateway issues a JWT with wide scopes (`read_orders`, `process_payments`, `update_shipping`) and passes it to the `Shipping Service`, a vulnerability in the Shipping Service would allow an attacker to steal that token and use it to call the `Payment Service`. By implementing Token Exchange (RFC 8693) at each hop, we ensure that the token handed to the Shipping Service is *only* valid for the Shipping Service.
-
----
