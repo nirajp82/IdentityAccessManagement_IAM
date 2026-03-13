@@ -344,7 +344,10 @@ builder.Services.AddHttpClient<IShippingClient, ShippingClient>()
 > * **Contained Blast Radius (The Bulkhead):** The Order Service pauses and uses Token Exchange. It swaps Alice's global JWT for a highly restricted `Shipping-Only` token *before* calling the Shipping Service.
 > * *The Breach:* The hacker compromises the Shipping Service and steals the token.
 > * *The Impact:* The hacker tries to use the stolen token to hit the Payment Service. The API Gateway instantly rejects it because the token's `audience` claim is strictly limited to the Shipping Service. The damage is mathematically confined to a single microservice.
-> 
+> A Confused Deputy vulnerability occurs when you:
+     - Give a service too much power (a "Wide" token).
+     - The service doesn't check if the "original" user actually had the right to do what it's about to do.
+     - For ex. The Shipping Service 'holds' a token that is authorized to process_payments, so an attacker who compromises the Shipping Service can use that hijacked token to drain the user's bank account."
 ---
 
 **Q: How does Blast Radius apply to overall Cloud Infrastructure and reliability?**
