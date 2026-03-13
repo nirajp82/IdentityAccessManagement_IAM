@@ -281,6 +281,38 @@ If you are designing this on a whiteboard, interviewers will challenge you on th
 
 > **A:** A Confused Deputy attack and privilege escalation. If the Edge Gateway issues a JWT with wide scopes (`read_orders`, `process_payments`, `update_shipping`) and passes it to the `Shipping Service`, a vulnerability in the Shipping Service would allow an attacker to steal that token and use it to call the `Payment Service`. By implementing Token Exchange (RFC 8693) at each hop, we ensure that the token handed to the Shipping Service is *only* valid for the Shipping Service.
 
+> Order Service to Shipping Service
+
+Now, the **Order Service** needs to tell the **Shipping Service** to ship the package.
+
+1. The **Order Service** takes the token it received from the Gateway.
+2. It calls the **STS** itself. It says: *"I am the Order Service. I have this token. I need a token specifically for the **Shipping Service**."*
+3. The **STS** issues a third token, valid **only** for Shipping.
+4. The **Order Service** calls the **Shipping Service** with this third token.
+
+In your .NET Microservice, you typically use `IHttpClientFactory`. You can attach a **Token Exchange Handler** to your client:
+
+```csharp
+// In Program.cs
+builder.Services.AddAccessTokenManagement()
+    .AddTokenExchangeToken("shipping-token-exchange", options =>
+    {
+        options.Address = "https://identity-server/connect/token";
+        options.ClientId = "order-service";
+        options.ClientSecret = "secret";
+        options.Scope = "shipping.api";
+    });
+
+builder.Services.AddHttpClient<IShippingClient, ShippingClient>()
+    .AddTokenExchangeHandler("shipping-token-exchange"); 
+
+```
+
+*Now, every time your `ShippingClient` makes a call, the .NET runtime automatically handles the STS exchange for you behind the scenes.*
+
+---
+
+
 ### Q&A: Understanding & Controlling the Blast Radius
 
 **Q: What exactly is a "Blast Radius" in cybersecurity and distributed systems?**
