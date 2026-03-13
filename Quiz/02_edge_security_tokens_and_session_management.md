@@ -582,7 +582,28 @@ public class TokenExchangeService : ITokenExchangeService {
 }
 
 ```
+## 4. How to call it in your Controller
 
+Because we used the Factory to set everything up in `Program.cs`, your controller stays 100% clean:
+
+```csharp
+[ApiController]
+[Route("api/orders")]
+public class OrdersController : ControllerBase {
+    private readonly IShippingClient _shipping;
+
+    // .NET automatically uses the Factory to build this for you
+    public OrdersController(IShippingClient shipping) => _shipping = shipping;
+
+    [HttpPost]
+    public async Task<IActionResult> Post(Order order) {
+        // This call is now Factory-managed and Token-exchanged!
+        await _shipping.CreateShipmentAsync(order);
+        return Ok();
+    }
+}
+
+```
 ---
 
 #### Summary of the Flow
