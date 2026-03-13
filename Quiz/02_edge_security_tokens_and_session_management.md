@@ -531,7 +531,18 @@ public class TokenForwardingHandler : DelegatingHandler
 By combining the **Sidecar Pattern** (for Security) with **Polly** (for Resiliency), you have engineered a nearly indestructible microservice.
 
 ---
+## 4. Deep Dive: Asymmetric Cryptography & JWKS
 
+Once the Gateway mints the JWT and passes it to the `Order Service`, how does the `Order Service` know the JWT isn't a fake created by a hacker?
+
+It uses **Asymmetric Cryptography (RS256)**.
+
+1. **The Private Key (Minting):** The API Gateway (or Identity Server) has a highly guarded Private Key. It uses this key to mathematically sign the JWT.
+2. **The Public Key (JWKS):** The Gateway publishes its Public Keys on a public endpoint (e.g., `/.well-known/jwks.json`). This is called a **JSON Web Key Set (JWKS)**.
+3. **The Validation:** The `Order Service` downloads the JWKS periodically. When a request arrives, it uses the Public Key to mathematically verify the signature on the JWT.
+
+Because this math happens in the microservice's local memory, it is incredibly fast and **Stateless**. It doesn't need to ask the database "Is this token real?"
+---
 ## 5. The Token Revocation Problem (The Lambda Scenario)
 
 **The Scenario:** A compromised user is downloading terabytes of proprietary AI training data. The admin deletes their account, but their session token is still valid for 55 minutes. How do you stop them instantly?
