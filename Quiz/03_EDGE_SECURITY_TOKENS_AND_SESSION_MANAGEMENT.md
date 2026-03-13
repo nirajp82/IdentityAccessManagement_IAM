@@ -51,6 +51,7 @@ What if the hacker intercepts the network traffic, or steals the token from a co
 * **How it works:** We implement **DPoP (Demonstrating Proof-of-Possession)**. When Alice's device authenticates, it generates a public/private key pair. It keeps the private key securely hidden in the device's hardware enclave and sends the public key to the Identity Provider.
 * **The Binding:** The Identity Provider binds the opaque token strictly to that specific public key.
 * **Why it stops hackers:** Every time Alice makes an API request, her device must sign the request using her hidden private key. If a hacker steals the opaque token and sends it from their own laptop, the API Gateway will demand the cryptographic signature. Since the hacker doesn't have Alice's hardware-backed private key, the request fails instantly. The stolen token is useless.
+* Read more here: [Solution B: Demonstrating Proof-of-Possession - DPoP](https://github.com/nirajp82/IdentityAccessManagement_IAM/blob/main/02_AuthN_Federation/06_OIDC_Intro.md#solution-b-demonstrating-proof-of-possession-dpop)
 
 **Defense 3: The Revocation Advantage (The Kill Switch)**
 Let's assume the absolute worst-case scenario: you don't have DPoP configured, the hacker steals the opaque token, and they start using it. Why is an opaque token still vastly superior to a standard JWT?
