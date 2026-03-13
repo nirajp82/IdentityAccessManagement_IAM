@@ -422,3 +422,112 @@ app.Run();
 If your C# code tries to call the `ShippingServiceClient` and the network is slow, Polly automatically retries. If Shipping is dead, Polly trips the circuit breaker and instantly throws an exception (which you catch and return a graceful message to the user). If the service backs up, the Bulkhead guarantees your Order Service will not run out of memory.
 
 You have successfully contained the blast radius on both the security layer and the infrastructure layer.
+
+---
+### FAQ: The Token Exchange Sidecar Pattern
+
+**Q: Should every microservice write its own code to handle Token Exchange?**
+
+> **A:** Absolutely not. If you don't use a sidecar, your .NET microservice has to handle the Token Exchange itself. Every time your Order Service wants to call Shipping, your developer has to write code to pause the business logic, call the central Security Token Service (STS), swap the original JWT for a scoped token, cache it, and attach it.
+> **The Problem:** This results in "Spaghetti Code." Your business logic becomes hopelessly tangled with complex OAuth 2.0 security protocols. If the token exchange logic changes, you have to rewrite and re-deploy every single microservice.
+
+**Q: How do we solve this without polluting the business logic?**
+
+> **A:** We use the **Token Exchange Sidecar Pattern**. By moving this logic into a Sidecar container (running in the exact same network pod as your .NET app), we make the microservice completely "dumb" regarding internal security.
+
+**Q: What is the exact mechanical flow of the Sidecar Pattern?**
+
+> **A:** It happens in 5 seamless steps:
+> 1. **The .NET App (Business Logic):** The developer writes simple code. To call Shipping, the app makes an HTTP request to `http://localhost:envoy_port/shipping`, attaching Alice's original JWT. The developer doesn't think about Token Exchange at all.
+> 2. **The Interception (The Enforcer):** An Envoy proxy (or Dapr/Istio) intercepts that outbound request before it ever leaves the pod. It enforces the rule: *"Any request heading to Shipping must have a Shipping-scoped token."*
+> 3. **The STS Call (The Exchange):** The Sidecar automatically pauses the request. It takes Alice's original JWT and silently makes a background call to the central STS, requesting a Shipping token.
+> 4. **The Handoff & Forward:** The central STS issues the short-lived, scoped token. The Sidecar receives it, strips off Alice's original token, attaches the newly scoped token, and forwards the request over the network.
+> 5. **Local Caching (The Speed Boost):** The Sidecar maintains a tiny, in-memory cache. If the Order Service calls Shipping 500 times in the next minute, the Sidecar just reuses the scoped token it already negotiated. It only calls the STS once.
+> 
+> 
+
+**Q: Why is this considered the "Gold Standard" in the industry?**
+
+> **A:** > * **Zero-Code Security:** Developers write zero security code for internal calls. They just call `localhost` and the infrastructure handles the blast radius reduction automatically.
+> * **Language Agnostic:** Because the sidecar is an independent container, it works exactly the same whether your microservice is written in .NET, Node.js, Go, or Python.
+> * **Instant Upgrades:** If the security team wants to change how Token Exchange works, they just update the Sidecar configuration. They don't touch the application code.
+> 
+> 
+
+**Q: What tools are actually used to build this in the real world?**
+
+> **A:** You rarely build the sidecar yourself. We use established service meshes and identity frameworks:
+> * **Envoy / Istio:** The most common service meshes; they can be configured to intercept and exchange tokens using an `External Authorization (ext_authz)` filter.
+> * **SPIFFE / SPIRE:** A framework designed to issue and manage machine-to-machine identities via local node agents.
+> * **Dapr:** A sidecar that natively handles secure service-to-service invocation.
+> 
+> 
+
+---
+
+### The Code: The "Dumb" .NET Microservice
+
+Because the Sidecar handles the complex security, and Polly (as we discussed previously) handles the infrastructure blast radius (Bulkheads, Retries, Circuit Breakers), your `.NET Program.cs` becomes incredibly elegant.
+
+Notice how the `HttpClient` just blindly points to `localhost` and forwards the incoming token.
+
+```csharp
+using Polly;
+using Polly.Extensions.Http;
+using Microsoft.AspNetCore.Authentication;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Define Infrastructure Blast Radius Policies (Polly)
+var retryPolicy = HttpPolicyExtensions.HandleTransientHttpError()
+    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+
+var circuitBreakerPolicy = HttpPolicyExtensions.HandleTransientHttpError()
+    .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
+
+var bulkheadPolicy = Policy.BulkheadAsync<HttpResponseMessage>(maxParallelization: 50, maxQueuedActions: 10);
+
+// 2. Configure the "Dumb" HttpClient
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient("ShippingClient", (serviceProvider, client) =>
+{
+    // The C# code points to the LOCAL SIDECAR port, not the real Shipping Service!
+    client.BaseAddress = new Uri("http://localhost:8001/shipping-api/"); 
+})
+// Add infrastructure protections
+.AddPolicyHandler(bulkheadPolicy)
+.AddPolicyHandler(circuitBreakerPolicy)
+.AddPolicyHandler(retryPolicy)
+// Add a DelegatingHandler to blindly attach the current user's JWT so the Sidecar can exchange it
+.AddHttpMessageHandler(serviceProvider => new TokenForwardingHandler(serviceProvider));
+
+var app = builder.Build();
+app.Run();
+
+// --- Helper: Blindly forwards the incoming JWT ---
+public class TokenForwardingHandler : DelegatingHandler
+{
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    public TokenForwardingHandler(IServiceProvider serviceProvider)
+    {
+        _httpContextAccessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        // Grab the incoming JWT from Alice
+        var token = await _httpContextAccessor.HttpContext.GetTokenAsync("access_token");
+        if (!string.IsNullOrEmpty(token))
+        {
+            // Attach Alice's raw token. The Sidecar will intercept this and swap it!
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+        return await base.SendAsync(request, cancellationToken);
+    }
+}
+
+```
+
+By combining the **Sidecar Pattern** (for Security) with **Polly** (for Resiliency), you have engineered a nearly indestructible microservice.
+
+---
