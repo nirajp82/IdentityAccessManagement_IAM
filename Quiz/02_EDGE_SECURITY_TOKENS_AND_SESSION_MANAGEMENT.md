@@ -231,7 +231,7 @@ Let's look at exactly how identity data moves through a distributed system when 
 
 If the Order Service needs to call *both* Payment and Shipping, it must perform **two separate Token Exchanges**. It cannot use the Payment-scoped token to talk to the Shipping service, and it should not use Alice's original broad token for either.
 
-Here is the corrected and complete sequence diagram, demonstrating the true power of RFC 8693 (Token Exchange) restricting the blast radius for multiple downstream calls.
+This sequence diagram, demonstrates the true power of RFC 8693 (Token Exchange) restricting the blast radius for multiple downstream calls.
 
 ```mermaid
 sequenceDiagram
