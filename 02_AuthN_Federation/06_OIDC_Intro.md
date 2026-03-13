@@ -652,7 +652,9 @@ fetch('https://api.myapp.com/orders', {
 
 ```
 
-**Summary:** If a hacker uses XSS to steal the `accessToken` from React's memory, the token is utterly useless. When the hacker attempts to use it from their own computer, they cannot generate the `DPoP` signature header because the `keyPair.privateKey` never left the victim's browser.
+**Summary:** :
+If a hacker uses XSS to steal the `accessToken` from React's memory, the token is utterly useless. When the hacker attempts to use it from their own computer, they cannot generate the `DPoP` signature header because the `keyPair.privateKey` never left the victim's browser.
+
 ---
 ## 10. Implementation: Validating the Token & Issuing Your App Session
 
