@@ -609,3 +609,82 @@ app.use('/ai-data', gatewayAuth, proxyToAiMicroservice);
 
 ---
 
+Here is a comprehensive, deep-dive FAQ document covering the architectural decisions, cryptographic mechanics, and real-world edge cases of identity management. I have specifically structured this to address the "Lambda Scenario" and incorporate your whiteboard Q&A with expanded, architect-level detail.
+
+---
+
+# 🛡️ Advanced IAM Architecture: Tokens, Cryptography, and Revocation
+
+When building secure distributed systems, identity management ultimately boils down to three core challenges: What format is the identity in? How do we mathematically trust it? And how do we instantly kill it when things go wrong?
+
+Here is the detailed architectural breakdown.
+
+---
+
+## Part 1: JSON Web Tokens (JWT) vs. Opaque Tokens
+
+**Q: What is the fundamental difference between a JWT and an Opaque Token?**
+
+> **A:** It comes down to "Value" vs. "Reference."
+> * **JSON Web Token (JWT) [Value Token]:** A JWT actually *contains* the data. It is a Base64-encoded JSON object that holds claims (like `user_id`, `email`, `role: admin`). Because the data is baked into the token and cryptographically signed, the receiving service doesn't need to ask a database what the token means. It is self-contained.
+> * **Opaque Token [Reference Token]:** An opaque token is just a random, meaningless string of characters (e.g., `xyz_98765`). It contains zero data. It acts merely as a pointer or a key to a database record. To understand what an opaque token means, a service *must* make a network call to the Identity Provider to look it up.
+> 
+> 
+
+**Q: Why shouldn't we just send a JWT directly to the user's browser or mobile app?**
+
+> **A:** **Information disclosure and token theft.** JWTs are encoded, not encrypted. Anyone can decode a JWT and read your internal tenant IDs, role structures, and user data. Furthermore, if a hacker steals a JWT via Cross-Site Scripting (XSS), they possess a stateless, self-contained key that grants them full access until the token's expiration time runs out.
+
+**Q: If we can't send JWTs to the frontend, but our internal microservices need them for speed, what do we do?**
+
+> **A:** We use the **Phantom Token Pattern**.
+> The Identity Provider issues an **Opaque Token** to the outside world. The frontend only ever sees this meaningless string. When the frontend makes an API call, the Edge API Gateway intercepts the opaque token, makes a high-speed background call to translate it, and mints a rich, signed **JWT**. The Gateway then forwards the JWT into your internal network.
+> * *Outside the firewall:* Maximum privacy and revokability (Opaque).
+> * *Inside the firewall:* Maximum speed and statelessness (JWT).
+> 
+> 
+
+---
+
+## Part 2: Asymmetric Cryptography (RS256 & JWKS)
+
+**Q: If internal microservices don't check a database, how do they know a JWT wasn't forged by a hacker?**
+
+> **A:** They use **Digital Signatures**. Every JWT has three parts: Header, Payload, and Signature. The signature proves that the token's payload hasn't been tampered with since the moment the Identity Provider created it.
+
+**Q: What is RS256, and why is it the industry standard for microservices?**
+
+> **A:** RS256 is an **Asymmetric** cryptographic algorithm. This means it uses two different keys:
+> 1. **The Private Key (For Signing):** This key is locked in a highly secure vault inside your Identity Server. *Only* the Identity Server can create the signature.
+> 2. **The Public Key (For Verifying):** This key is mathematically related to the private key, but it can only *read* signatures, not create them. You can safely share this public key with every single microservice in your network.
+> 
+> 
+> If you used a *Symmetric* algorithm (like HS256), your Identity Server and your microservices would have to share the exact same secret password. If one microservice gets hacked, the attacker steals the secret and can now mint fake admin tokens. With RS256, a hacked microservice only yields a Public Key, which is useless for forging tokens.
+
+**Q: What is a JWKS (JSON Web Key Set), and how do microservices get the Public Key?**
+
+> **A:** Hardcoding public keys into your microservices is a bad idea because keys need to be rotated regularly for security.
+> A **JWKS** is a standard, public JSON endpoint hosted by your Identity Provider (e.g., `https://auth.yourcompany.com/.well-known/jwks.json`). It hosts a list of all currently valid Public Keys.
+> When your microservice boots up, it downloads the JWKS and caches it in memory. When a JWT arrives, the microservice uses the cached Public Key to run the math and verify the signature in a fraction of a millisecond.
+
+---
+
+## Part 3: The Token Revocation Problem (Stateless vs. Stateful)
+
+### The Use Case (The Lambda Scenario):
+
+*A compromised user is downloading terabytes of proprietary AI training data. The admin detects the anomaly and clicks "Delete Account." However, the user's current session token (JWT) is still mathematically valid for another 55 minutes. Because the internal AI microservices are "stateless," they only check the cryptographic signature, not the database. How do you stop the download instantly?*
+
+**Q: If JWTs are stateless, how do we revoke them?**
+
+> **A:** Pure statelessness is a myth in high-security systems. If you rely entirely on math, you lose control. To fix this, we combine **short-lived access tokens** (e.g., 15 minutes) with a **highly available distributed cache (Redis)** at the API Gateway.
+> When the admin clicks "Delete Account," an event fires that instantly adds that user's ID to a Redis Blocklist. The API Gateway is configured with a strict rule: it must check the Redis blocklist *before* it even bothers validating the JWT signature.
+> In the Lambda Scenario, the very next time the hacker's script tries to pull the next chunk of AI data, the API Gateway sees their ID on the blocklist and drops the connection instantly. The internal microservices never even see the request.
+
+**Q: Why not just check the primary database (like PostgreSQL or MySQL) on every request?**
+
+> **A:** It creates a massive **Database Bottleneck**.
+> Imagine the Lambda Scenario: you have 10,000 GPUs making parallel API calls every single second to fetch training data. If your API Gateway has to query a relational PostgreSQL database 10,000 times a second just to ask, *"Is this user still active?"* the database will lock up and crash, taking your entire platform down with it.
+> We *must* push validation to the edge. Redis is an in-memory datastore capable of handling millions of reads per second with sub-millisecond latency. By keeping the blocklist in Redis at the Gateway, we get the instant revocation of a "stateful" architecture without sacrificing the blazing speed of a "stateless" architecture.
+
+---
