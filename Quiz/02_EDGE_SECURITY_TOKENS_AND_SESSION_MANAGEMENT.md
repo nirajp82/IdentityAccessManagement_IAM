@@ -67,48 +67,6 @@ Let's trace exactly how identity flows securely from the client, through the edg
 
 To do this accurately, we must answer a critical question: **Who actually creates the Opaque Token?** The answer changes entirely depending on whether Alice is using a Web Browser (React) or a Mobile App (iOS/Android). We use a different pattern for each to achieve the exact same goal: protecting the internal JWT.
 
-### Clarification 1: How do you force Auth0 to generate an Opaque Token?
-
-In OAuth 2.0, an Identity Provider (like Auth0) can issue two types of Access Tokens: **Value Tokens** (JWTs containing actual data) or **Reference Tokens** (Opaque strings that act as pointers).
-
-**The Auth0 Trigger:**
-In Auth0, the format of the token is controlled entirely by the `audience` parameter in your initial login request.
-
-1. **To get a JWT:** If your mobile app requests a specific custom API (e.g., `audience=https://api.yourstore.com`), Auth0 defaults to issuing a rich, signed **JWT**.
-2. **To get an Opaque Token:** If your mobile app omits the `audience` parameter, or passes the default Auth0 `/userinfo` endpoint as the audience, Auth0 automatically issues an **Opaque Token** (a random string like `ref_opaque_token`).
-
-*Alternatively, in many enterprise Identity Providers (like Duende IdentityServer or Okta), there is a literal toggle switch in the dashboard for your specific Mobile Client that says: `Access Token Type: [JWT / Reference]`. You simply select "Reference" to force the opaque token pattern.*
-
----
-
-### Clarification 2: Does every API call have to go back to Auth0?
-
-You spotted the exact vulnerability in the Phantom Token Pattern.
-
-When the Mobile App sends `Authorization: Bearer ref_opaque_token` to your API Gateway, the Gateway cannot read it. It **must** ask Auth0 what the token means using a standard endpoint called **Token Introspection (RFC 7662)**.
-
-If your user makes 50 API calls in one minute, and your Gateway makes 50 HTTP requests back to Auth0 to translate `ref_opaque_token`, you will add massive network latency to your app and likely hit Auth0's rate limits.
-
-**The Solution: Gateway Caching & Self-Signing**
-
-To fix this, the API Gateway does not ask Auth0 every single time. It uses a high-speed local cache (like Redis) and **mints its own internal JWTs**.
-
-Here is exactly how the translation mechanics work on the Gateway:
-
-1. **The First Request (The Cache Miss):** Alice opens the mobile app and makes her first request (`GET /orders`). The Gateway sees the opaque token `ref_opaque_token`. It checks its local Redis cache. Nothing is there.
-2. **The Introspection:** The Gateway pauses the request and calls Auth0: `POST /introspect (token=ref_opaque_token)`.
-3. **The JSON Payload:** Auth0 looks up the token in its database and replies with a plain JSON object containing the claims: `{"active": true, "sub": "alice123", "email": "alice@email.com", "roles": ["shopper"]}`.
-4. **Minting the Internal JWT:** The API Gateway takes that JSON payload and generates a brand-new **Internal JWT**. It signs this new JWT using its *own* internal private key.
-5. **The Cache (The Secret Sauce):** The Gateway saves a mapping in Redis: `"ref_opaque_token" = [The New Internal JWT]`. It sets this cache to expire in a short window (e.g., 5 minutes).
-6. **The Handoff:** The Gateway forwards the request to the Order Microservice, attaching the new internal JWT.
-
-**The Subsequent Requests (The Fast Path):**
-When Alice clicks another button 10 seconds later, the Mobile App sends `ref_opaque_token` again.
-
-1. The Gateway checks Redis.
-2. It instantly finds the mapped Internal JWT.
-3. It forwards the request to the microservices in less than 1 millisecond. **It does not talk to Auth0.**
-
 #### Scenario A: The Web Browser Checkout (The BFF Pattern)
 
 When Alice shops on a web browser, the Identity Provider (Auth0) does **not** create the opaque token. The Backend-for-Frontend (BFF) does.
@@ -190,6 +148,48 @@ sequenceDiagram
     Gateway->>Order: 12. Forward GET /orders + [Internal JWT]
 
 ```
+
+### Clarification 1: How do you force Auth0 to generate an Opaque Token?
+
+In OAuth 2.0, an Identity Provider (like Auth0) can issue two types of Access Tokens: **Value Tokens** (JWTs containing actual data) or **Reference Tokens** (Opaque strings that act as pointers).
+
+**The Auth0 Trigger:**
+In Auth0, the format of the token is controlled entirely by the `audience` parameter in your initial login request.
+
+1. **To get a JWT:** If your mobile app requests a specific custom API (e.g., `audience=https://api.yourstore.com`), Auth0 defaults to issuing a rich, signed **JWT**.
+2. **To get an Opaque Token:** If your mobile app omits the `audience` parameter, or passes the default Auth0 `/userinfo` endpoint as the audience, Auth0 automatically issues an **Opaque Token** (a random string like `ref_opaque_token`).
+
+*Alternatively, in many enterprise Identity Providers (like Duende IdentityServer or Okta), there is a literal toggle switch in the dashboard for your specific Mobile Client that says: `Access Token Type: [JWT / Reference]`. You simply select "Reference" to force the opaque token pattern.*
+
+---
+
+### Clarification 2: Does every API call have to go back to Auth0?
+
+You spotted the exact vulnerability in the Phantom Token Pattern.
+
+When the Mobile App sends `Authorization: Bearer ref_opaque_token` to your API Gateway, the Gateway cannot read it. It **must** ask Auth0 what the token means using a standard endpoint called **Token Introspection (RFC 7662)**.
+
+If your user makes 50 API calls in one minute, and your Gateway makes 50 HTTP requests back to Auth0 to translate `ref_opaque_token`, you will add massive network latency to your app and likely hit Auth0's rate limits.
+
+**The Solution: Gateway Caching & Self-Signing**
+
+To fix this, the API Gateway does not ask Auth0 every single time. It uses a high-speed local cache (like Redis) and **mints its own internal JWTs**.
+
+Here is exactly how the translation mechanics work on the Gateway:
+
+1. **The First Request (The Cache Miss):** Alice opens the mobile app and makes her first request (`GET /orders`). The Gateway sees the opaque token `ref_opaque_token`. It checks its local Redis cache. Nothing is there.
+2. **The Introspection:** The Gateway pauses the request and calls Auth0: `POST /introspect (token=ref_opaque_token)`.
+3. **The JSON Payload:** Auth0 looks up the token in its database and replies with a plain JSON object containing the claims: `{"active": true, "sub": "alice123", "email": "alice@email.com", "roles": ["shopper"]}`.
+4. **Minting the Internal JWT:** The API Gateway takes that JSON payload and generates a brand-new **Internal JWT**. It signs this new JWT using its *own* internal private key.
+5. **The Cache (The Secret Sauce):** The Gateway saves a mapping in Redis: `"ref_opaque_token" = [The New Internal JWT]`. It sets this cache to expire in a short window (e.g., 5 minutes).
+6. **The Handoff:** The Gateway forwards the request to the Order Microservice, attaching the new internal JWT.
+
+**The Subsequent Requests (The Fast Path):**
+When Alice clicks another button 10 seconds later, the Mobile App sends `ref_opaque_token` again.
+
+1. The Gateway checks Redis.
+2. It instantly finds the mapped Internal JWT.
+3. It forwards the request to the microservices in less than 1 millisecond. **It does not talk to Auth0.**
 
 #### The Ultimate Result
 
