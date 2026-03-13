@@ -229,6 +229,10 @@ Let's look at exactly how identity data moves through a distributed system when 
 
 **The Scenario:** Alice's browser sends a request to checkout. The request hits the Edge API Gateway, which routes to the `Order Microservice`. The Order service must then call the `Payment Microservice` and the `Shipping Microservice`.
 
+If the Order Service needs to call *both* Payment and Shipping, it must perform **two separate Token Exchanges**. It cannot use the Payment-scoped token to talk to the Shipping service, and it should not use Alice's original broad token for either.
+
+Here is the corrected and complete sequence diagram, demonstrating the true power of RFC 8693 (Token Exchange) restricting the blast radius for multiple downstream calls.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -237,27 +241,32 @@ sequenceDiagram
     participant STS as Token Service (STS)
     participant Order as Order Service
     participant Payment as Payment Service
+    participant Shipping as Shipping Service
 
-    Browser->>Gateway: 1. POST /checkout (Header: Opaque Token "xyz789")
+    Browser->>Gateway: 1. POST /checkout (Header: Opaque Token "ref_opaque_token")
     
     Note over Gateway: Edge Security: The Phantom Token Pattern
-    Gateway->>STS: 2. Validate Opaque "xyz789" & request internal JWT
+    Gateway->>STS: 2. Validate Opaque "ref_opaque_token" & request internal JWT
     STS-->>Gateway: 3. Returns rich JWT (sub: Alice, scope: buy)
     
     Gateway->>Order: 4. Forward Request + JWT
     
-    Note over Order: Order Service needs to charge the card.
-    Note over Order: Token Exchange prevents privilege escalation.
+    Note over Order: Call 1: The Payment Service
+    Order->>STS: 5. Token Exchange: "Swap JWT for Payment-only token"
+    STS-->>Order: 6. Returns scoped token (Audience: PaymentService, TTL: 60s)
     
-    Order->>STS: 5. Token Exchange: "Swap Alice's JWT for a Payment-only token"
-    STS-->>Order: 6. Returns heavily scoped Payment Token (Audience: PaymentService, TTL: 60s)
-    
-    Order->>Payment: 7. POST /charge + Scoped Payment Token
+    Order->>Payment: 7. POST /charge + Payment Token
     Payment-->>Order: 8. 200 OK (Payment successful)
     
-    Order-->>Gateway: 9. Order Confirmed
-    Gateway-->>Browser: 10. 200 OK
-
+    Note over Order: Call 2: The Shipping Service
+    Order->>STS: 9. Token Exchange: "Swap original JWT for Shipping-only token"
+    STS-->>Order: 10. Returns scoped token (Audience: ShippingService, TTL: 60s)
+    
+    Order->>Shipping: 11. POST /ship + Shipping Token
+    Shipping-->>Order: 12. 200 OK (Shipping arranged)
+    
+    Order-->>Gateway: 13. Order Confirmed
+    Gateway-->>Browser: 14. 200 OK
 ```
 
 ### The Whiteboard FAQ (The Defense)
