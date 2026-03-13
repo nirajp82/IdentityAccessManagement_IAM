@@ -530,6 +530,82 @@ public class TokenForwardingHandler : DelegatingHandler
 
 By combining the **Sidecar Pattern** (for Security) with **Polly** (for Resiliency), you have engineered a nearly indestructible microservice.
 
+## FAQ: The Mechanics of the Sidecar Pattern
+
+**Q: Do all microservice sidecars run the exact same codebase and DLLs?**
+
+> **A:** Yes, every single sidecar runs the exact same, pre-compiled binary.
+> However, there is a crucial distinction: **The sidecar is not a `.dll` or a NuGet package.** It is a completely separate application (an "out-of-process" container) running inside the exact same network space (a Kubernetes Pod) as your `.NET` application.
+> * **Your App:** Written in C# (`.NET`). Runs your custom business logic.
+> * **The Sidecar:** Usually a proxy like **Envoy** (written in C++) or **Dapr** (written in Go). It runs the exact same standard release version (e.g., `envoyproxy/envoy:v1.28`) across your entire company. You do not write or maintain custom sidecar code for each microservice.
+> 
+> 
+
+**Q: If the sidecar binary is identical everywhere, how does the Order Sidecar know to request a "Shipping" token, and the Shipping Sidecar know to request a "Payment" token?**
+
+> **A:** **Configuration over Code.**
+> Think of the Sidecar (Envoy) like a highly trained Security Guard.
+> * You hire 100 guards from the exact same security company. They all have the exact same training, uniform, and radio equipment (The identical Envoy binary).
+> * However, when you place Guard A at the front door, and Guard B at the vault, you hand them different **clipboards with different rules** (The Configuration).
+> 
+> 
+> In a Service Mesh (like Istio), a central server called the **Control Plane** dynamically pushes these specific YAML rules down into the memory of the identical Envoy sidecars sitting next to your microservices.
+
+**Q: How does the C# application actually interact with this Sidecar? (The App Code)**
+
+> **A:** Because the sidecar runs in the same network pod, they share the same `localhost`. Your C# developer writes incredibly simple code that just points to the local proxy port. The C# code is completely unaware that Token Exchange is happening.
+> ```csharp
+> // Inside the Order Service (C# .NET)
+> // The developer just wants to call the Shipping Service.
+> 
+> var client = new HttpClient();
+> // Notice: We don't point to "https://shipping-api.internal"
+> // We point to the local Envoy Sidecar intercept port (e.g., 8001)
+> client.BaseAddress = new Uri("http://localhost:8001/shipping/"); 
+> 
+> // We attach Alice's original JWT. We let the Sidecar figure out the rest.
+> client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", alicesOriginalJwt);
+> 
+> var response = await client.PostAsync("create-label", shippingData);
+> 
+> ```
+> 
+> 
+
+**Q: What does the Sidecar configuration actually look like? (The Infrastructure Code)**
+
+> **A:** Instead of writing C# code to handle the token swap, your Platform/Security team writes a YAML configuration file and uploads it to the Control Plane. The Control Plane pushes this rule exclusively to the Order Service's sidecar.
+> Here is a conceptual example of an Envoy/Istio configuration rule:
+> ```yaml
+> # Configuration pushed ONLY to the Order Service Sidecar
+> apiVersion: security.istio.io/v1
+> kind: RequestAuthentication
+> metadata:
+>   name: order-to-shipping-token-exchange
+> spec:
+>   rules:
+>     - match:
+>         # When the C# app tries to hit the /shipping path...
+>         path: "/shipping/*"
+>       action:
+>         # Pause the request and call the central Security Token Service (STS)
+>         call_sts_endpoint: "https://central-sts.internal/exchange"
+>         # Swap Alice's token for a new token scoped ONLY for Shipping
+>         requested_audience: "shipping-service"
+>         # Strip Alice's token and inject the new one before forwarding over the network
+>         inject_header: "Authorization: Bearer {new_scoped_token}"
+> 
+> ```
+> 
+> 
+
+**Q: What are the massive advantages of separating the Application Code from the Sidecar Configuration?**
+
+> **A:** > 1. **Zero-Code Security:** Your C# developers write zero security code. They just call `localhost` and focus on business features.
+> 2. **Language Agnostic:** Because the sidecar is just an identical C++ container, it works the exact same way if your Order Service is written in C#, but your AI microservice is written in Python. You don't have to rewrite security libraries for different languages.
+> 3. **Instant Global Patching:** If a massive zero-day security vulnerability is discovered in how tokens are handled, you don't have to wait for 50 different microservice teams to update their C# `.dlls`, recompile, and redeploy. The platform team simply upgrades the central standard Envoy Docker image, and the entire company's infrastructure is patched instantly.
+
+---
 ---
 ## 4. Deep Dive: Asymmetric Cryptography & JWKS
 
@@ -606,10 +682,6 @@ async function gatewayAuth(req, res, next) {
 app.use('/ai-data', gatewayAuth, proxyToAiMicroservice);
 
 ```
-
----
-
-Here is a comprehensive, deep-dive FAQ document covering the architectural decisions, cryptographic mechanics, and real-world edge cases of identity management. I have specifically structured this to address the "Lambda Scenario" and incorporate your whiteboard Q&A with expanded, architect-level detail.
 
 ---
 
