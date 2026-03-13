@@ -480,7 +480,117 @@ You have successfully contained the blast radius on both the security layer and 
 > 4. **The Handoff & Forward:** The central STS issues the short-lived, scoped token. The Sidecar receives it, strips off Alice's original token, attaches the newly scoped token, and forwards the request over the network.
 > 5. **Local Caching (The Speed Boost):** The Sidecar maintains a tiny, in-memory cache. If the Order Service calls Shipping 500 times in the next minute, the Sidecar just reuses the scoped token it already negotiated. It only calls the STS once.
 > 
-> 
+
+## Production-Grade Implementation
+
+### 1. Registration (`Program.cs`)
+
+This is where the magic happens. By using `AddHttpClient`, you tell .NET to use the Factory to manage sockets for you.
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Standard infrastructure
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpContextAccessor();
+
+// Logic & Security
+builder.Services.AddTransient<TokenExchangeHandler>();
+builder.Services.AddScoped<ITokenExchangeService, TokenExchangeService>();
+
+/* * BEST PRACTICE: Using IHttpClientFactory via `builder.Services.AddHttpClient`.
+ * This prevents SOCKET EXHAUSTION by pooling and reusing the 
+ * underlying HttpMessageHandler (the actual network connection).
+ */
+builder.Services.AddHttpClient("STSClient", client => {
+    client.BaseAddress = new Uri("https://identity-server.com/");
+});
+
+/* * TYPED CLIENT: We register IShippingClient. 
+ * The Factory will automatically inject a managed HttpClient into it.
+ */
+builder.Services.AddHttpClient<IShippingClient, ShippingClient>(client => {
+    client.BaseAddress = new Uri("https://shipping-api.com/");
+})
+.AddHttpMessageHandler<TokenExchangeHandler>(); // Attaches our "Security Sidecar"
+
+var app = builder.Build();
+
+```
+
+---
+
+### 2. The Typed Client (`ShippingClient.cs`)
+
+The `HttpClient` provided here is managed by the Factory. When `ShippingClient` is disposed, the **connection** stays alive in the pool for others to use.
+
+```csharp
+public class ShippingClient : IShippingClient {
+    private readonly HttpClient _http;
+
+    // The 'http' instance is provided by IHttpClientFactory.
+    // It is safe to use because the Factory manages its lifecycle.
+    public ShippingClient(HttpClient http) => _http = http;
+
+    public async Task CreateShipmentAsync(object order) {
+        // Business logic is clean. Security is handled by the DelegatingHandler.
+        await _http.PostAsJsonAsync("api/shipments", order);
+    }
+}
+
+```
+
+---
+
+### 3. The Handler & Service
+
+The logic remains the same, but notice how the `TokenExchangeService` uses `_factory.CreateClient("STSClient")`. This ensures even our calls to the STS are socket-safe.
+
+```csharp
+public class TokenExchangeService : ITokenExchangeService {
+    private readonly IHttpClientFactory _factory;
+    private readonly IMemoryCache _cache;
+
+    public TokenExchangeService(IHttpClientFactory factory, IMemoryCache cache) {
+        _factory = factory;
+        _cache = cache;
+    }
+
+    public async Task<string> GetExchangedTokenAsync(string userToken, string scope) {
+        string cacheKey = $"token_{scope}_{userToken.GetHashCode()}";
+
+        if (_cache.TryGetValue(cacheKey, out string cachedToken)) return cachedToken;
+
+        // CreateClient retrieves a pre-configured connection from the Factory's pool
+        var client = _factory.CreateClient("STSClient");
+
+        var payload = new Dictionary<string, string> {
+            { "grant_type", "urn:ietf:params:oauth:grant-type:token-exchange" },
+            { "subject_token", userToken },
+            { "subject_token_type", "urn:ietf:params:oauth:token-type:access_token" },
+            { "scope", scope }
+        };
+
+        var response = await client.PostAsync("connect/token", new FormUrlEncodedContent(payload));
+        response.EnsureSuccessStatusCode();
+
+        var data = await response.Content.ReadFromJsonAsync<TokenResponse>();
+        _cache.Set(cacheKey, data.AccessToken, TimeSpan.FromMinutes(55));
+
+        return data.AccessToken;
+    }
+}
+
+```
+
+---
+
+## Why this solves Socket Exhaustion?
+
+1. **Reuse:** Instead of opening and closing a new connection for every request, `IHttpClientFactory` keeps a pool of connections open to the Shipping API and the STS.
+2. **Cleanup:** When a connection gets old or stale, the Factory cleans it up properly in the background, something that manual `new HttpClient()` often fails to do.
+3. **Efficiency:** It limits the number of open sockets to only what is necessary, even if your site gets 10,000 requests per second.
+
 
 **Q: Why is this considered the "Gold Standard" in the industry?**
 
