@@ -280,3 +280,145 @@ If you are designing this on a whiteboard, interviewers will challenge you on th
 **Q: What is the risk of simply passing the original JWT all the way down the call chain?**
 
 > **A:** A Confused Deputy attack and privilege escalation. If the Edge Gateway issues a JWT with wide scopes (`read_orders`, `process_payments`, `update_shipping`) and passes it to the `Shipping Service`, a vulnerability in the Shipping Service would allow an attacker to steal that token and use it to call the `Payment Service`. By implementing Token Exchange (RFC 8693) at each hop, we ensure that the token handed to the Shipping Service is *only* valid for the Shipping Service.
+
+### Q&A: Understanding & Controlling the Blast Radius
+
+**Q: What exactly is a "Blast Radius" in cybersecurity and distributed systems?**
+
+> **A:** In the physical world, a blast radius is the exact distance an explosion travels before it stops causing damage.
+> In distributed systems and cybersecurity, the **Blast Radius** is the maximum potential impact that a single failure, misconfiguration, or security breach can have on your overall system, your data, or your customers.
+> Understanding blast radius is about answering one terrifying question: *"If this specific component catches fire, what else burns down with it?"*
+
+---
+
+**Q: How does Blast Radius work mechanically?**
+
+> **A:** A blast radius is determined by two opposing forces: **Coupling** (how tightly connected your systems are) and **Boundaries** (the physical or logical walls you build to stop the fire from spreading).
+> **The Submarine Analogy:**
+> Imagine a submarine. If the submarine is built as just one giant, hollow tube and the hull gets breached, the entire ship fills with water and sinks instantly. That is a **massive, uncontrolled blast radius**.
+> To fix this, naval engineers invented "bulkheads"—heavy, waterproof doors that divide the submarine into separate, sealed compartments. If the hull breaches, only that one specific compartment floods. The ship stays afloat. That is a **contained blast radius**.
+> In software, we must build digital bulkheads.
+
+---
+
+**Q: How does Blast Radius apply specifically to Identity and Access Management (IAM)?**
+
+> **A:** In IAM, blast radius is usually tied to token scopes and the "Confused Deputy" vulnerability. We control it using **Token Exchange (RFC 8693)**.
+> Let's look at an E-Commerce application where an Order Service needs to call a Shipping Service and a Payment Service.
+> * **Large Blast Radius (The Hollow Submarine):** The Order Service receives Alice's global JWT (which has broad scopes to read orders, process payments, and change passwords). It blindly passes that exact same global JWT forward to the Shipping Service.
+> * *The Breach:* A hacker finds a vulnerability in the Shipping Service and steals Alice's token from memory.
+> * *The Impact:* The hacker now possesses a global token. They can use it to hit the Payment Service and refund themselves. The breach in "Shipping" completely compromised "Payments."
+> 
+> * **Contained Blast Radius (The Bulkhead):** The Order Service pauses and uses Token Exchange. It swaps Alice's global JWT for a highly restricted `Shipping-Only` token *before* calling the Shipping Service.
+> * *The Breach:* The hacker compromises the Shipping Service and steals the token.
+> * *The Impact:* The hacker tries to use the stolen token to hit the Payment Service. The API Gateway instantly rejects it because the token's `audience` claim is strictly limited to the Shipping Service. The damage is mathematically confined to a single microservice.
+> 
+---
+
+**Q: How does Blast Radius apply to overall Cloud Infrastructure and reliability?**
+
+> **A:** Blast radius isn't just about hackers; it is also about bad code deployments, memory leaks, and infrastructure failures.
+> * **Large Blast Radius (Global Deployments):** You deploy a new version of your .NET API to all of your servers globally at the exact same time. Unfortunately, there is a hidden memory leak in the new code.
+> * *The Impact:* Every server crashes simultaneously. 100% of your global user base experiences a total outage.
+> 
+> * **Contained Blast Radius (Cell-Based Architecture):** You divide your infrastructure into isolated "Cells" or "Stamps." Cell A handles US-East customers. Cell B handles EU-West customers. You only deploy the new code to Cell A to monitor it.
+> * *The Impact:* The memory leak crashes Cell A. US-East goes down, but EU-West remains perfectly online because they do not share memory, databases, or compute resources. Your blast radius was successfully limited to 50% of your users instead of 100%.
+> 
+---
+
+**Q: How do we actively design systems to minimize the Blast Radius?**
+
+> **A:** You cannot prevent all failures. Servers will crash, and hackers will find vulnerabilities. Your primary job is to control the blast radius so that when a failure inevitably happens, the business survives. You do this by enforcing three strict boundaries:
+> 1. **Identity Boundaries (Least Privilege):** Never give a user, a microservice, or a token more permissions than it needs to perform its immediate job. Use highly scoped tokens, explicit audiences, and short expirations.
+> 2. **Tenant Boundaries (Data Isolation):** In a SaaS application, strictly partition your databases and caches by a `tenant_id`. If Customer A writes a terrible API query that locks up their database shard, it shouldn't slow down Customer B's database queries.
+> 3. **Infrastructure Boundaries (Circuit Breakers & Fallbacks):** If a downstream service goes offline, the calling service shouldn't crash while waiting for a response. You implement "Circuit Breakers" so the calling service instantly fails gracefully (perhaps saving the payload to a queue to process later) rather than bringing down the entire API Gateway.
+> 
+> By designing with blast radius in mind, you stop treating your application as one massive, fragile glass window, and start treating it like a grid of shatterproof safety glass.
+> 
+### Part 2: The Infrastructure Blast Radius (Resiliency Patterns)
+
+If the Security Blast Radius protects against hackers, the Infrastructure Blast Radius protects against network failures and bad deployments.
+
+If the `Payment Service` goes completely offline, the `Order Service` will start throwing errors. If we aren't careful, the `Order Service` will leave thousands of HTTP connections open, waiting for the Payment Service to respond, until the Order Service runs out of memory and crashes too. The fire spreads.
+
+We stop the fire using three physical boundaries.
+
+#### 1. The Retry Pattern (Handling the "Hiccup")
+
+Network traffic drops packets. Sometimes a service fails for exactly 1 second.
+
+* **The Rule:** Don't instantly crash the user's checkout. Try again.
+* **The Catch:** Never retry immediately, or you will accidentally DDoS your own servers. Use **Exponential Backoff** (wait 1s, then 2s, then 4s) to give the struggling service time to breathe.
+
+#### 2. The Circuit Breaker (The "Fail Fast" Boundary)
+
+What if the downstream service is completely dead? If you keep retrying, you are just wasting CPU cycles and making the outage worse.
+
+* **The Rule:** If a service fails 5 times in a row, "trip" the circuit breaker.
+* **The Action:** For the next 30 seconds, any code that tries to call that service will instantly fail without even making a network request. This is called **Failing Fast**. It prevents your system from hanging and gives the broken service 30 seconds of pure silence to reboot and recover.
+
+#### 3. The Bulkhead Pattern (The Submarine Door)
+
+Imagine your Order Service handles both `Payments` and `Emails`. The Email Service gets backed up and takes 30 seconds to respond. Suddenly, all 1,000 threads in your Order Service are stuck waiting for the Email Service. Now, nobody can process a Payment, even though the Payment Service is perfectly fine!
+
+* **The Rule:** Isolate your connection pools.
+* **The Action:** You assign a strict "Bulkhead" (maximum concurrent connections) for each downstream service. For example, allocate max 200 threads for Emails. If the Email service backs up, those 200 threads get stuck, but the remaining 800 threads are walled off and free to continue processing Payments.
+
+---
+
+### Part 3: The Code Implementation (.NET & Polly)
+
+In .NET, we do not write these patterns from scratch. We use an industry-standard library called **Polly**. Modern .NET natively integrates Polly directly into the `HttpClient`.
+
+Here is how you physically enforce these boundaries in your `Program.cs` startup file.
+
+```csharp
+using Polly;
+using Polly.Extensions.Http;
+using System.Net.Http;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Define the Retry Policy (Exponential Backoff)
+var retryPolicy = HttpPolicyExtensions
+    .HandleTransientHttpError() // Handles 5xx errors and network timeouts
+    .WaitAndRetryAsync(
+        retryCount: 3,
+        sleepDurationProvider: attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)) // Waits 2s, 4s, 8s
+    );
+
+// 2. Define the Circuit Breaker Policy
+var circuitBreakerPolicy = HttpPolicyExtensions
+    .HandleTransientHttpError()
+    .CircuitBreakerAsync(
+        handledEventsAllowedBeforeBreaking: 5, // Break the circuit after 5 consecutive failures
+        durationOfBreak: TimeSpan.FromSeconds(30) // Wait 30 seconds before trying again (Half-Open)
+    );
+
+// 3. Define the Bulkhead Isolation Policy
+// Max 50 concurrent requests to the Shipping Service. Any requests over 50 are instantly rejected.
+var bulkheadPolicy = Policy.BulkheadAsync<HttpResponseMessage>(
+    maxParallelization: 50, 
+    maxQueuedActions: 10 // Only allow 10 requests to wait in line; reject the rest.
+);
+
+// 4. Register the HttpClient and wrap it in our blast-radius protections
+builder.Services.AddHttpClient("ShippingServiceClient", client =>
+{
+    // The C# code uses this "dumb" localhost URL, trusting the Sidecar to handle Token Exchange
+    client.BaseAddress = new Uri("http://localhost:8001/shipping-api/"); 
+})
+.AddPolicyHandler(bulkheadPolicy)       // 1st Layer: Thread Isolation
+.AddPolicyHandler(circuitBreakerPolicy) // 2nd Layer: Fail Fast
+.AddPolicyHandler(retryPolicy);         // 3rd Layer: Handle hiccups
+
+var app = builder.Build();
+app.Run();
+
+```
+
+### The Final Result
+
+If your C# code tries to call the `ShippingServiceClient` and the network is slow, Polly automatically retries. If Shipping is dead, Polly trips the circuit breaker and instantly throws an exception (which you catch and return a graceful message to the user). If the service backs up, the Bulkhead guarantees your Order Service will not run out of memory.
+
+You have successfully contained the blast radius on both the security layer and the infrastructure layer.
