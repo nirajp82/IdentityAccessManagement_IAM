@@ -138,9 +138,10 @@ This is achieved using **SPIFFE** (Secure Production Identity Framework for Ever
 Before the Windows Server even boots up, you (the Architect) must configure your central SPIRE Server with two strict rules. Think of these as inserting configuration rows into a central security database. You are defining the acceptable "DNA."
 
 **Rule 1: Trusting the Windows Machine (Node Registration)**
-Before SPIRE will issue a certificate to your .NET app, it must first trust the physical (or virtual) Windows Server that the app is running on.
+Before SPIRE will issue a certificate to your .NET app, it must first trust the physical Windows Server hosting the app. You define this rule by running a CLI command on the central SPIRE Server to save it into its database.
 
-* **What it means:** *"If a machine boots up and can mathematically prove to us (via an AWS metadata check or a hardware TPM chip) that it is an official company server, trust it."*
+* **What it means:**  *"If a machine tries to join our SPIRE network, reject it unless it provides a cryptographic document signed by AWS proving that it is an EC2 instance, running in our exact corporate AWS account (`123456789012`), and has the `WindowsServerRole` attached to its hardware."*
+
 * **The Configuration Command:**
 ```powershell
 spire-server.exe entry create `
