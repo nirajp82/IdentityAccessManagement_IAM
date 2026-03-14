@@ -61,16 +61,16 @@ If you try to solve this using standard RBAC, you experience **Role Explosion**.
 * **JWT Limits:** You can't fit 50 roles into a JWT without exceeding the HTTP header size limit, meaning the token is rejected by load balancers.
 
 ---
-
 ### Phase 3: The Need for Context (Attribute-Based Access Control - ABAC)
 
-When RBAC fails, architects turn to ABAC. Instead of looking at a static "Role," the system evaluates boolean logic (IF/THEN) against the **Attributes** of the user, the resource, and the environment at the exact moment the request is made.
+When RBAC fails, architects turn to ABAC. Instead of looking at a static "Role," the system evaluates boolean logic (IF/THEN) against the **Attributes** of the request at the exact moment it is made.
 
-**The Logic:**
+To make an ABAC decision, the system looks at the 4 Pillars of Context:
 
-* *Subject Attribute:* Alice's clearance level.
-* *Resource Attribute:* The Image Folder's owning Tenant ID.
-* *Environment Attribute:* Is it within business hours? Is the customer's billing account active?
+* **Subject Attribute (Who):** Alice's clearance level or Tenant ID.
+* **Action Attribute (The Verb):** What is she trying to do? (e.g., `generate_thumbnail`).
+* **Resource Attribute (The Noun):** The specific Image Folder she is acting on.
+* **Environment Attribute (The Conditions):** Is the customer's billing account active? Is the request coming from a trusted IP address?
 
 #### The Breaking Point: Latency and Spaghetti Code
 
@@ -94,10 +94,9 @@ public async Task<IActionResult> GenerateThumbnail(string folderId)
     return Ok("Generating Thumbnails...");
 }
 
-
 ```
 
-If the business changes the billing rules, you have to rewrite your C# code, recompile, and deploy the entire API. Furthermore, making 3 database queries just to answer "Can Alice do this?" destroys your API's response time.
+If the business changes the billing rules, you have to rewrite your C# code, recompile, and deploy the entire API. Furthermore, making 3 database queries just to answer *"Can Alice do this?"* destroys your API's response time.
 
 ---
 
@@ -128,21 +127,23 @@ To perfectly understand this separation, let's look at what happens when Alice c
 
 #### The C# Implementation: The Decoupled API
 
-When you adopt PBAC, you rip the database queries and the `if` statements completely out of your controller. Here is what your Phase 3 code looks like after upgrading to Phase 4:
+When you adopt PBAC, you rip the database queries and the `if` statements completely out of your controller. Here is what your Phase 3 code looks like after upgrading to Phase 4, now naturally passing all the context the Policy Engine needs:
 
 ```csharp
 // Phase 4: The PBAC Pattern (Decoupled & Clean)
 [HttpPost("folders/{folderId}/thumbnails/generate")]
 public async Task<IActionResult> GenerateThumbnail(string folderId)
 {
-    // 1. Build the Context (Who, What, Where). Notice: ZERO database queries here!
+    // 1. Build the Complete Context (Who, What, Where, Conditions)
+    // Notice: ZERO database queries here!
     var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
     var action = "generate_thumbnail";
     var resource = $"folder:{folderId}";
+    var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(); // Environment
 
     // 2. Ask the Policy Decision Point (PDP)
     // The API sends a tiny JSON payload to the external Policy Engine.
-    bool isAuthorized = await _policyEngineClient.EvaluateAsync(userId, action, resource);
+    bool isAuthorized = await _policyEngineClient.EvaluateAsync(userId, action, resource, clientIpAddress);
 
     // 3. Enforce the Decision (The PEP's only responsibility)
     if (!isAuthorized)
@@ -153,7 +154,6 @@ public async Task<IActionResult> GenerateThumbnail(string folderId)
     // 4. Execute Core Business Logic
     return Ok("Generating Thumbnails...");
 }
-
 
 ```
 
@@ -168,7 +168,7 @@ When your controller calls `_policyEngineClient.EvaluateAsync(...)`, .NET cannot
 
 ```csharp
 // The physical bridge between .NET and the Policy Engine
-public async Task<bool> EvaluateAsync(string subject, string action, string resource, string tenantId)
+public async Task<bool> EvaluateAsync(string subject, string action, string resource, string ipAddress)
 {
     // 1. Build the exact JSON envelope the Policy Engine expects
     var requestPayload = new
@@ -178,7 +178,7 @@ public async Task<bool> EvaluateAsync(string subject, string action, string reso
             subject = subject,
             action = action,
             resource = resource,
-            user_tenant_id = tenantId
+            environment_ip = ipAddress
         }
     };
 
@@ -194,7 +194,6 @@ public async Task<bool> EvaluateAsync(string subject, string action, string reso
     // 4. Return the raw boolean to the controller
     return opaResponse?.Result?.Allow ?? false;
 }
-
 
 ```
 
@@ -237,7 +236,6 @@ allow {
     
     # Notice: We omit the billing check here, because viewing status is free.
 }
-
 
 ```
 
