@@ -440,14 +440,14 @@ Console.WriteLine("Successfully pulled image data without static secrets!");
 sequenceDiagram
     autonumber
     
-    box rgb(240, 248, 255) The Application
+    box rgba(128, 128, 128, 0.1) The Application
         participant App as Thumbnail Maker (.NET)
     end
-    box rgb(240, 255, 240) Azure Infrastructure
+    box rgba(128, 128, 128, 0.15) Azure Infrastructure
         participant LocalHost as Azure Hypervisor
         participant Entra as Entra ID (Azure AD)
     end
-    box rgb(255, 245, 240) Target Service
+    box rgba(128, 128, 128, 0.1) Target Service
         participant Vault as Azure Key Vault
     end
 
