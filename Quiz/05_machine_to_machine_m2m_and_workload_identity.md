@@ -501,39 +501,46 @@ Console.WriteLine("Successfully pulled secret using Zero-Secret Azure Managed Id
 
 When presenting this architecture to stakeholders or security teams, here is how you defend the shift to Workload Identity.
 
+### Part 1: The Core Problem & The Solution
+
 **Q: Why are static API keys a bad architecture choice?**
 
 > **A:** They don't expire, they get committed to GitHub (Secret Sprawl), and they are incredibly hard to rotate without causing application downtime. Furthermore, they are Bearer tokens; if stolen, they can be used from outside the corporate network.
 
 **Q: How do we fix this for cloud workloads, and why is Workload Identity considered the "Industry Standard"?**
 
-> **A:** We use **Identity Federation**. We link the compute environment (Kubernetes `ServiceAccount` or Azure App Service) directly to the Cloud Provider via an OIDC provider. The platform automatically injects a short-lived, auto-rotating Web Identity Token into the pod. The code's SDK exchanges this token for temporary cloud credentials. We completely remove the human element of secret management. There are no keys to generate, no keys to store in CI/CD pipelines, no keys for developers to accidentally commit to GitHub, and no keys to manually rotate.
+> **A:** We use **Identity Federation** and **Hypervisor Trust**. We link the compute environment (an AWS EC2 Instance or Azure App Service) directly to the Cloud Provider. The physical platform automatically injects short-lived, auto-rotating credentials into the application. The code's SDK seamlessly uses these temporary credentials. We completely remove the human element of secret management. There are no keys to generate, no keys to store in CI/CD pipelines, no keys for developers to accidentally commit to GitHub, and no keys to manually rotate.
 
-**Q: Is SPIFFE/SPIRE a replacement for OAuth 2.0 Client Credentials?**
-
-> **A:** No, they serve different boundaries.
-> * **OAuth 2.0 Client Credentials:** Use this when calling **External APIs** (like our external billing partner). You cannot ask an external partner to inspect your internal Windows DNA (SPIFFE), and they do not live inside your Azure subscription to understand your Managed Identity. You *must* use a secret to cross the public internet. You securely store the `client_secret` in a Key Vault, and you use Cloud Workload Identity to allow your app to securely read that secret from the vault.
-> * **SPIFFE/mTLS:** Use this when calling **Internal Microservices** (like the `Thumbnail Maker` calling the internal `Storage Web API`). Because you own the network, you can use dynamic Workload Attestation to achieve true Zero-Secret architecture.
-> 
-> 
-
-**Q: In the Kubernetes/S3 example, what happens if the 1-hour AWS token expires, but the Thumbnail image processing batch takes 3 hours?**
-
-> **A:** The AWS SDK handles this seamlessly. Background threads in the `AmazonS3Client` monitor the expiration time. Minutes before the temporary credentials expire, the SDK re-reads the (automatically rotated) Kubernetes JWT from the file system, calls AWS STS, and silently refreshes the credentials in memory without dropping the connection or interrupting the processing loop.
-
-**Q: How does AWS Workload Identity (IRSA) prevent a different pod from accessing the raw images S3 bucket?**
-
-> **A:** The Trust Policy in AWS is incredibly granular. When you configure AWS to trust your Kubernetes cluster, you don't just trust the whole cluster. You write a rule that says: *"Only allow this access if the JWT specifically belongs to the Kubernetes namespace `image-processing` and the ServiceAccount name `thumbnail-worker`."* If a compromised web-server pod in the same cluster tries to exchange its token, AWS STS will cryptographically verify the token's claims, see the `ServiceAccount` mismatch, and instantly deny the request. The Blast Radius is strictly contained.
-
-**Q: How does Azure Managed Identity prevent a hacker from stealing the token?**
-
-> **A:** The Managed Identity token can only be requested by pinging a specific, non-routable local IP address (`169.254.169.254`). This IP address is intercepted by the physical Azure Hypervisor hosting your VM or App Service. A hacker sitting in a coffee shop in another country cannot ping that IP address. Furthermore, the token it returns is only valid for a specific resource (like Azure SQL or Key Vault) and expires automatically in about 60 minutes.
+### Part 2: Architectural Boundaries (What to use When)
 
 **Q: What is the exact boundary for using SPIFFE/mTLS versus Cloud Workload Identity (AWS IAM / Azure Managed Identities)?**
 
 > **A:** It entirely depends on **who owns the server receiving the request.**
 > * **Use SPIFFE / mTLS when you own BOTH the client and the server.** If your custom `.NET Thumbnail Maker` is calling your custom `.NET Storage API`, you control the code on both ends. You can easily configure the receiving web server (Kestrel) to intercept the connection, read the SPIFFE X.509 certificate, and validate its "DNA" (the SAN URI).
-> * **Use Cloud Workload Identity when you own the client, but the Cloud Provider owns the server.** If your app needs to talk to a Managed Service like AWS S3, AWS DynamoDB, or Azure Key Vault, you cannot rewrite Amazon or Microsoft's internal code to make them accept your custom SPIFFE certificate. Instead, you use Identity Federation to temporarily adopt *their* native credentials (IAM Roles or Entra ID tokens) to securely cross their proprietary borders.
+> * **Use Cloud Workload Identity when you own the client, but the Cloud Provider owns the server.** If your app needs to talk to a Managed Service like AWS S3, AWS DynamoDB, or Azure Key Vault, you cannot rewrite Amazon or Microsoft's internal code to make them accept your custom SPIFFE certificate. Instead, you rely on the cloud hypervisor to temporarily adopt *their* native credentials (IAM Roles or Entra ID tokens) to securely cross their proprietary borders.
 > 
 > 
+
+**Q: Is SPIFFE/SPIRE a replacement for OAuth 2.0 Client Credentials?**
+
+> **A:** No, they serve different boundaries.
+> * **OAuth 2.0 Client Credentials:** Use this when calling **External APIs** (like our external billing partner). You cannot ask an external partner to inspect your internal Windows DNA (SPIFFE), and they do not live inside your Azure subscription to understand your Managed Identity. You *must* use a secret to cross the public internet. You securely store the `client_secret` in a Key Vault, and you use Cloud Workload Identity to allow your app to securely read that secret from the vault.
+> * **SPIFFE/mTLS:** Use this when calling **Internal Microservices**. Because you own the network, you can use dynamic Workload Attestation to achieve true Zero-Secret architecture.
+> 
+> 
+
+### Part 3: Under-the-Hood Security & Operations
+
+**Q: In the AWS EC2 / S3 example, what happens if the 1-hour AWS token expires, but the Thumbnail image processing batch takes 3 hours?**
+
+> **A:** The AWS SDK handles this seamlessly. Background threads in the `AmazonS3Client` monitor the expiration time. Minutes before the temporary credentials expire, the SDK quietly reaches back out to the EC2 Instance Metadata Service (IMDS), calls AWS STS, and silently refreshes the credentials in memory without dropping the connection or interrupting your `.NET` processing loop.
+
+**Q: How does AWS Workload Identity prevent a different EC2 VM from accessing the raw images S3 bucket?**
+
+> **A:** The Blast Radius is strictly contained by the AWS Hypervisor. When you configure AWS, you attach a specific IAM Role directly to the exact EC2 instance running the `Thumbnail Maker`. If a compromised web-server VM in the same AWS account tries to ping the IMDS for credentials to access the S3 bucket, the AWS Hypervisor will see that the web-server VM does *not* have the Thumbnail Maker's IAM Role attached to its virtual hardware. It will instantly deny the request.
+
+**Q: How does Azure Managed Identity prevent a hacker from stealing the token?**
+
+> **A:** The Managed Identity token can only be requested by pinging a specific, non-routable local IP address (`169.254.169.254`). This IP address is physically intercepted by the Azure Hypervisor hosting your VM or App Service. A hacker sitting in a coffee shop in another country cannot ping that IP address. Furthermore, the token it returns is only valid for a specific resource (like Azure Key Vault) and expires automatically in about 60 minutes.
+
 ---
