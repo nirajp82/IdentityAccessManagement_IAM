@@ -133,16 +133,37 @@ Think about how humans do it in high-security facilities. We don't use passwords
 
 This is achieved using **SPIFFE** (Secure Production Identity Framework for Everyone) and **SPIRE** (the runtime engine). Let's look at how our `Thumbnail Maker` securely calls the internal `Storage Web API` using this approach on a Windows Server.
 
-#### Step 1: The Setup (Configuring the SPIRE Server)
+### Machine 1: The Central SPIRE Server (The "Security Database")
 
-Before the Windows Server even boots up, you (the Architect) must configure your central SPIRE Server with two strict rules. Think of these as inserting configuration rows into a central security database. You are defining the acceptable "DNA."
+This is a dedicated, highly secure machine (or a cluster of machines) sitting somewhere in your network. It does not run your .NET code. It is the central authority—the boss.
 
-**Rule 1: Trusting the Windows Machine (Node Registration)**
-Before SPIRE will issue a certificate to your .NET app, it must first trust the physical Windows Server hosting the app. You define this rule by running a CLI command on the central SPIRE Server to save it into its database.
+* **What runs here:** The `spire-server` executable.
+* **What you do here:** This is where *you*, the Architect, open PowerShell and type the `entry create` commands. You only do this once during setup to insert the rules into its database.
 
-* **What it means:**  *"If a machine tries to join our SPIRE network, reject it unless it provides a cryptographic document signed by AWS proving that it is an EC2 instance, running in our exact corporate AWS account (`123456789012`), and has the `WindowsServerRole` attached to its hardware."*
+### Machine 2: The AWS EC2 Instance (The "Worker")
 
-* **The Configuration Command:**
+This is your standard application server.
+
+* **What runs here:** Two things run side-by-side on this machine:
+1. Your **.NET Thumbnail Maker** app.
+2. The **SPIRE Agent** (running quietly in the background as a Windows Service).
+
+
+* **What you do here:** You do *not* run any setup commands here. This machine simply boots up, and the SPIRE Agent reaches out over the network to **Machine 1** to get its certificates based on the rules you already created.
+
+---
+
+With that physical map in mind, let's rewrite Step 1 so it is absolutely foolproof.
+
+### Step 1: The Setup (Executed on Machine 1 - The SPIRE Server)
+
+Before you deploy your .NET application, you must log into **Machine 1 (The SPIRE Server)** and configure your security rules. Think of these commands as `INSERT` statements adding rules into a central security database.
+
+#### Rule 1: Trust the physical EC2 Machine (The Node)
+
+We cannot trust an application if we don't first trust the server it is running on. We need to insert a rule that says: *"Trust our official AWS EC2 virtual machines."*
+
+* **The Action:** You open PowerShell on **Machine 1 (The SPIRE Server)** and run this command:
 ```powershell
 spire-server.exe entry create `
     -node `
@@ -151,14 +172,14 @@ spire-server.exe entry create `
 
 ```
 
-* **The Identity Granted:** If the machine passes this test, the SPIRE Server issues it a foundational certificate representing the server itself: `spiffe://mycompany.internal/windows-server-node`.
-* **Why is this needed?** This acts as the "foundation of trust." The central SPIRE Server will *only* listen to requests for application certificates if those requests come from a machine that holds this foundational node certificate.
 
-**Rule 2: Trusting the .NET Application (Workload Registration)**
-Now you define the rule for your specific application running on that machine.
+* **What this does:** It tells the central database: *"When Machine 2 boots up and talks to us over the network, reject it **unless** AWS mathematically proves it belongs to our corporate AWS account (`123456789012`) and has the `WindowsServerRole`."*
 
-* **What it means:** *"If a trusted Windows Server asks for an application identity, and the Windows Operating System itself guarantees the application making the request is running under the `DOMAIN\svc_thumbnailer` Windows account, give it the Thumbnail Maker identity."*
-* **The Configuration Command:**
+#### Rule 2: Trust the .NET Application (The Workload)
+
+Now that the database knows to trust Machine 2, we need to add a second rule for the specific .NET application running on it. Think of this rule as having a **Foreign Key** (`-parentID`) pointing back to the machine in Rule 1.
+
+* **The Action:** Still logged into **Machine 1 (The SPIRE Server)**, you run this second command:
 ```powershell
 spire-server.exe entry create `
     -spiffeID spiffe://mycompany.internal/thumbnail-maker `
@@ -168,8 +189,9 @@ spire-server.exe entry create `
 ```
 
 
-* **The Identity Granted:** When your .NET app passes this test, it receives its secure ID badge: an X.509 certificate mathematically tied to the identity `spiffe://mycompany.internal/thumbnail-maker`.
-* **Why is this needed?** This links the cryptographic identity directly to the Windows OS process. It ensures that even if another app on the same server tries to ask for the Thumbnail Maker's identity, the SPIRE Agent will see it's running under the wrong Windows account and deny the request.
+* **What this does:** It tells the central database: *"If a trusted Windows machine asks for an app identity, and the Windows Operating System itself guarantees the app making the request is running under the `DOMAIN\svc_thumbnailer` Windows account, generate the Thumbnail Maker certificate and send it over the network to them."*
+
+---
 
 ---
 
