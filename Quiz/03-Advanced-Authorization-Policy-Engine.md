@@ -223,11 +223,14 @@ allow {
     # Condition C: It checks the tenant match...
     folder.tenant_id == input.user_tenant_id
     
-    # Condition D: It queries the Billing API...
+    # Condition D: The PDP fetches its own Environment Attribute dynamically!
     billing_response := http.send({"method": "GET", "url": "http://billing-service/status"})
     billing_response.body == "Active"
     
-    # If A AND B AND C AND D are all true, "allow" becomes TRUE.
+    # Condition E: It verifies the Environment Attribute passed by the PEP (.NET)
+    startswith(input.environment_ip, "192.168.")
+    
+    # If A AND B AND C AND D AND E are all true, "allow" becomes TRUE.
 }
 
 # 3. Rule: Viewing Thumbnail Status (A different action with lighter rules)
