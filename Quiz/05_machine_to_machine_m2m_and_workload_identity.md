@@ -230,26 +230,82 @@ sequenceDiagram
 
 ```
 
-#### Step 3: The .NET Implementation (Client & Server Code)
+### Step 3: The .NET Implementation (Client & Server Code)
 
-**The Client Code (Thumbnail Maker):**
-The developer configures their `HttpClient` to use the dynamically injected certificate. There are no API keys or JWTs.
+Now that the central database is configured (Step 1) and the SPIRE Agent is running locally on the Windows VM, we need to write the actual C# code.
+
+We will break this down into two parts: how the Client gets its identity and makes the call, and how the Server validates that identity.
+
+#### Part 1: The OS Kernel "DNA Test" (Under the Hood)
+
+Before we look at the C# code, it is vital to understand *why* the code doesn't require a password.
+
+When your `.NET` app connects to the local SPIRE Agent via a **Windows Named Pipe**, the Agent intercepts the connection and makes native Windows API (Win32) calls directly to the Kernel to find out who is knocking:
+
+1. **`GetNamedPipeClientProcessId()`**: The Agent asks the Kernel, *"What is the Process ID (PID) on the other side of this pipe?"* (e.g., PID 4092).
+2. **`OpenProcessToken()` & `GetTokenInformation()**`: The Agent asks the Kernel, *"Read the Windows Security Identifier (SID) inside this process token. Who actually owns this process?"* 3. **The Match:** Windows replies that the owner is `DOMAIN\svc_thumbnailer`. The Agent checks our rules from Step 1, confirms the match, and streams the certificate straight down the pipe.
+
+#### Part 2: The Client Code (.NET Thumbnail Maker)
+
+As a C# developer, you do not write the complex Kernel APIs. You simply install the official **`Spiffe.WorkloadApi`** NuGet package and write a single method to fetch the certificate and attach it to your `HttpClient`.
+
+Here is the complete, logically structured method:
 
 ```csharp
-// Notice: No API Keys. No Client Secrets. No JWTs. No Auth Headers.
-var request = new HttpRequestMessage(HttpMethod.Get, "https://storage-api.internal/api/images/raw/12345");
-var response = await _httpClient.SendAsync(request);
+using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
+using Spiffe.WorkloadApi;
+
+public class ImageDownloaderService
+{
+    public async Task<string> DownloadRawImageAsync(string imageId)
+    {
+        // 1. Point the SDK to the local SPIRE Agent's Windows Named Pipe
+        // (By default, SPIRE creates this pipe at: npipe:pipe\spire-agent\public\api)
+        Environment.SetEnvironmentVariable("SPIFFE_ENDPOINT_SOCKET", "npipe:pipe\\spire-agent\\public\\api");
+
+        // 2. The DNA Test: Connect to the local Bouncer via the Named Pipe
+        // Notice: We do NOT pass a password, API key, or Client Secret here!
+        using var workloadClient = await WorkloadApiClient.CreateAsync();
+        
+        // 3. Fetch the dynamically generated X.509 Certificate and Private Key from memory
+        var x509Context = await workloadClient.FetchX509ContextAsync();
+        X509Certificate2 mySpiffeCert = x509Context.DefaultSvid.Certificate;
+
+        Console.WriteLine($"Successfully acquired identity: {x509Context.DefaultSvid.Id}");
+        // Output: spiffe://mycompany.internal/thumbnail-maker
+
+        // 4. Attach the Certificate to the HttpClient for Mutual TLS (mTLS)
+        var handler = new HttpClientHandler();
+        handler.ClientCertificates.Add(mySpiffeCert);
+
+        using var httpClient = new HttpClient(handler);
+
+        // 5. Make the Secure Call to the Storage API
+        var request = new HttpRequestMessage(HttpMethod.Get, $"https://storage-api.internal/api/images/raw/{imageId}");
+        var response = await httpClient.SendAsync(request);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
+}
 
 ```
 
-**The Server Code (Storage Web API Validation):**
-How does the Storage API (the bouncer) validate this incoming certificate? The SPIFFE ID (`spiffe://mycompany.internal/thumbnail-maker`) is cryptographically stamped inside the certificate's **Subject Alternative Name (SAN)** field. Your API must extract and verify it.
+#### Part 3: The Server Code (Storage Web API Validation)
 
-Here is the exact code inside `Program.cs` for the receiving API:
+Finally, how does the receiving Storage API (the bouncer) validate this incoming certificate?
+
+When the SPIRE Server generates that X.509 certificate for the Thumbnail Maker, it cryptographically stamps the identity (`spiffe://mycompany.internal/thumbnail-maker`) into a specific field called the **Subject Alternative Name (SAN)**.
+
+In your Storage Web API's `Program.cs`, you configure Kestrel to intercept the mTLS connection, crack open the certificate, and verify that exact SPIFFE ID:
 
 ```csharp
 using Microsoft.AspNetCore.Authentication.Certificate;
 
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Certificate Authentication to the API
 builder.Services.AddAuthentication(CertificateAuthenticationDefaults.AuthenticationScheme)
     .AddCertificate(options =>
     {
@@ -263,9 +319,15 @@ builder.Services.AddAuthentication(CertificateAuthenticationDefaults.Authenticat
                 
                 // Extract the Subject Alternative Name (OID 2.5.29.17)
                 var sanExtension = clientCert.Extensions["2.5.29.17"];
-                if (sanExtension == null) return Task.CompletedTask;
+                if (sanExtension == null) 
+                {
+                    context.Fail("No Subject Alternative Name found.");
+                    return Task.CompletedTask;
+                }
 
                 var sanData = sanExtension.Format(false);
+                
+                // Define the exact identity we are expecting
                 var expectedSpiffeId = "URI=spiffe://mycompany.internal/thumbnail-maker";
                 
                 // The Match
@@ -275,14 +337,23 @@ builder.Services.AddAuthentication(CertificateAuthenticationDefaults.Authenticat
                 }
                 else
                 {
-                    context.Fail("Authentication Failed: Unknown SPIFFE ID.");
+                    context.Fail($"Authentication Failed: Unknown SPIFFE ID: {sanData}");
                 }
+                
                 return Task.CompletedTask;
             }
         };
     });
 
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+app.Run();
+
 ```
+
+---
 
 **Why this makes you a Pro Architect:**
 You have achieved **Zero-Secret Architecture**. If a hacker breaches the server, there are no passwords to steal. If they steal the short-lived X.509 certificate, it is mathematically useless to them unless they also steal the hardware-bound private key, which is locked in memory. You have solved the Secret Zero problem.
