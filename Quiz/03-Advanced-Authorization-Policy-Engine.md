@@ -59,13 +59,12 @@ If you try to solve this using standard RBAC, you experience **Role Explosion**.
 
 * **Database Bloat:** Managing this becomes a nightmare again.
 * **JWT Limits:** You can't fit 50 roles into a JWT without exceeding the HTTP header size limit, meaning the token is rejected by load balancers.
-
 ---
 ### Phase 3: The Need for Context (Attribute-Based Access Control - ABAC)
 
 When RBAC fails, architects turn to ABAC. Instead of looking at a static "Role," the system evaluates boolean logic (IF/THEN) against the **Attributes** of the request at the exact moment it is made.
 
-To make an ABAC decision, the system looks at the 4 Pillars of Context:
+To make an ABAC decision, the system looks at the **4 Pillars of Context**:
 
 * **Subject Attribute (Who):** Alice's clearance level or Tenant ID.
 * **Action Attribute (The Verb):** What is she trying to do? (e.g., `generate_thumbnail`).
@@ -74,32 +73,35 @@ To make an ABAC decision, the system looks at the 4 Pillars of Context:
 
 #### The Breaking Point: Latency and Spaghetti Code
 
-ABAC gives you infinite, granular control. But it creates a massive software engineering problem. To evaluate complex attributes, your .NET API controller has to fetch data *before* it can make a decision. Your controller code becomes heavily coupled with security logic.
+ABAC gives you infinite, granular control. But it creates a massive software engineering problem. To evaluate complex attributes, your .NET API controller has to fetch data **before** it can make a decision. Your controller code becomes heavily coupled with security logic.
 
 ```csharp
 // The ABAC Anti-Pattern: Spaghetti Controller
 public async Task<IActionResult> GenerateThumbnail(string folderId)
 {
+    // The API has to "go shopping" for data just to make a security decision
     var user = await _userRepo.GetUser(User.Id);
     var folder = await _folderRepo.GetFolder(folderId);
     var billing = await _billingClient.GetStatus(folder.CustomerId);
 
     // Hardcoded security logic mixing with business logic
+    // This is the "Spaghetti" - if a rule changes, you must re-deploy this code.
     if (user.TenantId != folder.TenantId || billing.Status == "Suspended")
     {
         return Forbid(); 
     }
     
     // N+1 queries just to authorize the request!
+    // This destroys response time before the actual work even begins.
     return Ok("Generating Thumbnails...");
 }
 
 ```
 
-If the business changes the billing rules, you have to rewrite your C# code, recompile, and deploy the entire API. Furthermore, making 3 database queries just to answer *"Can Alice do this?"* destroys your API's response time.
+**Why this fails at scale:**
+If the business changes the billing rules (e.g., *"Allow suspended accounts to view thumbnails but not generate them"*), you have to rewrite your C# code, open a Pull Request, recompile, and deploy the entire API. Furthermore, making 3 database queries just to answer *"Can Alice do this?"* creates a massive latency tax on every single request.
 
 ---
-
 ### Phase 4: Decoupling with Policy-Based Access Control (PBAC)
 
 #### The Problem with the ABAC Code
@@ -252,6 +254,8 @@ When the engine finishes evaluating, it wraps the final boolean in a JSON respon
 * **Stateless Security:** Your .NET code no longer knows *why* Alice was allowed or denied. It doesn't know what a Tenant ID is, and it doesn't know what a Billing Status is. It just knows the Policy Engine sent back `{"allow": true}`.
 * **Agility (Zero-Downtime Updates):** If the enterprise requires a new rule tomorrow, the .NET engineers **do not write a single line of C# code**. The security team simply updates the text-based policy file inside the Policy Engine. The rules change dynamically across your entire global infrastructure instantly.
 * **Centralized Auditing:** You now have a single repository of policy files that prove exactly who has access to what, which makes passing compliance audits (SOC2, HIPAA) trivial.
+
+---
 
 ---
 ### Phase 5: Solving Data Latency (ReBAC & Google Zanzibar)
