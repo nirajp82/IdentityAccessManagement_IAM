@@ -96,7 +96,6 @@ var response = await apiClient.PostAsync("https://api.partner.com/billing/upload
 
 ```
 
-
 **Where OAuth 2.0 Fails Internally (The Secret Zero Problem):**
 The Client Credentials flow is mathematically secure, but **it has a fatal flaw at cloud scale:** Where does the `Thumbnail Maker` keep the `ClientSecret`?
 
@@ -124,27 +123,51 @@ This brings us back to the ultimate flaw: **The Bearer Vulnerability**. Even tho
 
 *(This exact vulnerability is why we must evolve to Phase 3: SPIFFE/SPIRE, where the identity is bound to the server itself using mTLS, and there are absolutely no secrets to extract from memory).*
 
-
 ---
 
 ### Phase 3: SPIFFE/SPIRE & mTLS (Internal Zero-Secret)
 
 If passwords and secrets are always vulnerable to being stolen and copied, the only solution is to **stop using them entirely**. But if a machine doesn't have a password, how does it prove who it is?
 
-Think about how humans do it in high-security facilities. We don't use passwords; we use **Biometrics** (fingerprints or DNA). You can't leave your DNA in a GitHub repository, and a hacker can't easily copy it to another country. We need to give our microservices and Windows Services "DNA."
+Think about how humans do it in high-security facilities. We don't use passwords; we use **Biometrics** (fingerprints or DNA). We need to give our microservices and Windows Services "DNA."
 
-This is achieved using **SPIFFE** (Secure Production Identity Framework for Everyone) and **SPIRE** (the runtime engine).
+This is achieved using **SPIFFE** (Secure Production Identity Framework for Everyone) and **SPIRE** (the runtime engine). Let's look at how our `Thumbnail Maker` securely calls the internal `Storage Web API` using this approach on a Windows Server.
 
-**The Flow (Workload Attestation):**
-Let's look at how our `Thumbnail Maker` securely calls the internal `Storage Web API` using this approach on a Windows Server.
+#### Step 1: The Setup (Configuring the SPIRE Server)
 
-1. **Zero Secrets:** The `.NET Thumbnail Maker` boots up on a Windows Server VM. It has absolutely zero passwords, API keys, or secrets in its `appsettings.json`.
+Before anything boots up, the Architect must define the security rules on the central SPIRE Server using registration entries. Think of this as defining the acceptable "DNA."
+
+* **Rule 1: Trusting the Windows Machine (Node Registration)**
+We tell the SPIRE Server to trust the physical VM if it proves it belongs to our company.
+```powershell
+spire-server.exe entry create `
+    -node `
+    -spiffeID spiffe://mycompany.internal/windows-server-node `
+    -selector aws_iid:iam_principal_arn:arn:aws:iam::123456789012:role/WindowsServerRole
+
+```
+
+
+* **Rule 2: Trusting the .NET Application (Workload Registration)**
+We tell the SPIRE Server: *"If a trusted Windows Server asks for an app identity, and the OS guarantees the app is running under the `DOMAIN\svc_thumbnailer` Windows account, give it the Thumbnail Maker identity."*
+```powershell
+spire-server.exe entry create `
+    -spiffeID spiffe://mycompany.internal/thumbnail-maker `
+    -parentID spiffe://mycompany.internal/windows-server-node `
+    -selector windows:user:DOMAIN\svc_thumbnailer
+
+```
+
+
+
+#### Step 2: The Flow (Workload Attestation)
+
+Once the rules are set, the system operates completely automatically:
+
+1. **Zero Secrets:** The `.NET Thumbnail Maker` boots up on the Windows Server VM. It has zero passwords in `appsettings.json`.
 2. **The Bouncer:** A local security agent (the SPIRE Agent) is running on that exact same Windows VM as a background service.
-3. **The DNA Test:** The `Thumbnail Maker` reaches out via a local Windows Named Pipe and says "I need an identity." The SPIRE Agent does *not* ask for a password. Instead, the Agent asks the **Windows OS Kernel**:
-* *"What user account is actually running the process connected to this Named Pipe?"*
-
-
-4. **The Wristband:** The Windows OS Kernel answers: *"It is running as `DOMAIN\svc_thumbnailer`."* (The Kernel cannot be lied to by a hacker's script). The SPIRE Agent verifies this matches the strict rules for the app. It dynamically generates a highly secure, short-lived **X.509 Certificate** (SVID) and drops it directly into the `.NET` application's memory.
+3. **The DNA Test:** The `Thumbnail Maker` reaches out via a local Windows Named Pipe and says "I need an identity." The SPIRE Agent does *not* ask for a password. Instead, the Agent asks the **Windows OS Kernel**: *"What user account is actually running the process connected to this Named Pipe?"*
+4. **The Wristband:** The Windows OS Kernel answers: *"It is running as `DOMAIN\svc_thumbnailer`."* (The Kernel cannot be lied to by a hacker's script). The SPIRE Agent verifies this matches Rule 2. It dynamically generates a highly secure, short-lived **X.509 Certificate** (SVID) and drops it directly into the `.NET` application's memory.
 5. **The Secure Call:** The `Thumbnail Maker` uses this certificate to establish a heavily encrypted **Mutual TLS (mTLS)** connection with the `Storage Web API`.
 
 ```mermaid
@@ -172,15 +195,57 @@ sequenceDiagram
 
 ```
 
-**The .NET Implementation (Zero-Secret mTLS):**
-The C# developer configures their `HttpClient` to use the dynamically injected certificate. There are no API keys or JWTs.
+#### Step 3: The .NET Implementation (Client & Server Code)
+
+**The Client Code (Thumbnail Maker):**
+The developer configures their `HttpClient` to use the dynamically injected certificate. There are no API keys or JWTs.
 
 ```csharp
-// The C# code in a Zero-Secret SPIFFE/SPIRE environment.
 // Notice: No API Keys. No Client Secrets. No JWTs. No Auth Headers.
-
 var request = new HttpRequestMessage(HttpMethod.Get, "https://storage-api.internal/api/images/raw/12345");
 var response = await _httpClient.SendAsync(request);
+
+```
+
+**The Server Code (Storage Web API Validation):**
+How does the Storage API (the bouncer) validate this incoming certificate? The SPIFFE ID (`spiffe://mycompany.internal/thumbnail-maker`) is cryptographically stamped inside the certificate's **Subject Alternative Name (SAN)** field. Your API must extract and verify it.
+
+Here is the exact code inside `Program.cs` for the receiving API:
+
+```csharp
+using Microsoft.AspNetCore.Authentication.Certificate;
+
+builder.Services.AddAuthentication(CertificateAuthenticationDefaults.AuthenticationScheme)
+    .AddCertificate(options =>
+    {
+        options.AllowedCertificateTypes = CertificateTypes.All;
+
+        options.Events = new CertificateAuthenticationEvents
+        {
+            OnCertificateValidated = context =>
+            {
+                var clientCert = context.ClientCertificate;
+                
+                // Extract the Subject Alternative Name (OID 2.5.29.17)
+                var sanExtension = clientCert.Extensions["2.5.29.17"];
+                if (sanExtension == null) return Task.CompletedTask;
+
+                var sanData = sanExtension.Format(false);
+                var expectedSpiffeId = "URI=spiffe://mycompany.internal/thumbnail-maker";
+                
+                // The Match
+                if (sanData.Contains(expectedSpiffeId, StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Success(); // Valid Identity! Let them in.
+                }
+                else
+                {
+                    context.Fail("Authentication Failed: Unknown SPIFFE ID.");
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
 
 ```
 
@@ -341,4 +406,3 @@ When presenting this architecture to stakeholders or security teams, here is how
 > **A:** The Managed Identity token can only be requested by pinging a specific, non-routable local IP address (`169.254.169.254`). This IP address is intercepted by the physical Azure Hypervisor hosting your VM or App Service. A hacker sitting in a coffee shop in another country cannot ping that IP address. Furthermore, the token it returns is only valid for a specific resource (like Azure SQL or Key Vault) and expires automatically in about 60 minutes.
 
 ---
-
