@@ -135,10 +135,13 @@ This is achieved using **SPIFFE** (Secure Production Identity Framework for Ever
 
 #### Step 1: The Setup (Configuring the SPIRE Server)
 
-Before anything boots up, the Architect must define the security rules on the central SPIRE Server using registration entries. Think of this as defining the acceptable "DNA."
+Before the Windows Server even boots up, you (the Architect) must configure your central SPIRE Server with two strict rules. Think of these as inserting configuration rows into a central security database. You are defining the acceptable "DNA."
 
-* **Rule 1: Trusting the Windows Machine (Node Registration)**
-We tell the SPIRE Server to trust the physical VM if it proves it belongs to our company.
+**Rule 1: Trusting the Windows Machine (Node Registration)**
+Before SPIRE will issue a certificate to your .NET app, it must first trust the physical (or virtual) Windows Server that the app is running on.
+
+* **What it means:** *"If a machine boots up and can mathematically prove to us (via an AWS metadata check or a hardware TPM chip) that it is an official company server, trust it."*
+* **The Configuration Command:**
 ```powershell
 spire-server.exe entry create `
     -node `
@@ -147,9 +150,14 @@ spire-server.exe entry create `
 
 ```
 
+* **The Identity Granted:** If the machine passes this test, the SPIRE Server issues it a foundational certificate representing the server itself: `spiffe://mycompany.internal/windows-server-node`.
+* **Why is this needed?** This acts as the "foundation of trust." The central SPIRE Server will *only* listen to requests for application certificates if those requests come from a machine that holds this foundational node certificate.
 
-* **Rule 2: Trusting the .NET Application (Workload Registration)**
-We tell the SPIRE Server: *"If a trusted Windows Server asks for an app identity, and the OS guarantees the app is running under the `DOMAIN\svc_thumbnailer` Windows account, give it the Thumbnail Maker identity."*
+**Rule 2: Trusting the .NET Application (Workload Registration)**
+Now you define the rule for your specific application running on that machine.
+
+* **What it means:** *"If a trusted Windows Server asks for an application identity, and the Windows Operating System itself guarantees the application making the request is running under the `DOMAIN\svc_thumbnailer` Windows account, give it the Thumbnail Maker identity."*
+* **The Configuration Command:**
 ```powershell
 spire-server.exe entry create `
     -spiffeID spiffe://mycompany.internal/thumbnail-maker `
@@ -159,6 +167,10 @@ spire-server.exe entry create `
 ```
 
 
+* **The Identity Granted:** When your .NET app passes this test, it receives its secure ID badge: an X.509 certificate mathematically tied to the identity `spiffe://mycompany.internal/thumbnail-maker`.
+* **Why is this needed?** This links the cryptographic identity directly to the Windows OS process. It ensures that even if another app on the same server tries to ask for the Thumbnail Maker's identity, the SPIRE Agent will see it's running under the wrong Windows account and deny the request.
+
+---
 
 #### Step 2: The Flow (Workload Attestation)
 
