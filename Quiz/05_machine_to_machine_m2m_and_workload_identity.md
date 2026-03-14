@@ -439,24 +439,40 @@ Console.WriteLine("Successfully pulled image data without static secrets!");
 ```mermaid
 sequenceDiagram
     autonumber
-    participant App as Thumbnail Maker (Azure App Service)
-    participant LocalHost as Azure Local Metadata Service
-    participant Entra as Microsoft Entra ID (Azure AD)
-    participant Vault as Azure Key Vault
+    
+    box rgb(240, 248, 255) The Application
+        participant App as Thumbnail Maker (.NET)
+    end
+    box rgb(240, 255, 240) Azure Infrastructure
+        participant LocalHost as Azure Hypervisor
+        participant Entra as Entra ID (Azure AD)
+    end
+    box rgb(255, 245, 240) Target Service
+        participant Vault as Azure Key Vault
+    end
 
-    Note over App,Entra: 1. You toggle "System Assigned Identity: ON" in Azure.
-    Entra->>Entra: 2. Azure silently creates an invisible Enterprise Application.
+    Note over App,Entra: SETUP: Toggle "System Assigned Identity: ON"
+    Entra->>Entra: Azure silently creates an invisible Enterprise App
+
+    Note over App: RUNTIME: SDK needs Key Vault access<br/>but sees no passwords in config.
     
-    Note over App: 3. The .NET app asks the Azure SDK for Key Vault access.
-    Note over App: 4. The SDK sees it has no passwords.
+    App->>LocalHost: Pings local metadata IP (169.254.169.254)
+    activate LocalHost
     
-    App->>LocalHost: 5. SDK automatically pings a hidden localhost IP (169.254.169.254) managed by the Azure Hypervisor.
-    LocalHost->>Entra: 6. "The App Service requested a token for Key Vault."
+    LocalHost->>Entra: Requests token for Key Vault
+    activate Entra
     
-    Note over Entra: 7. Entra verifies the request is coming from the physical Azure infrastructure hosting your app.
-    Entra-->>App: 8. Returns a highly secure, short-lived Access Token (JWT).
+    Note over Entra: Verifies the physical Azure server<br/>hosting the app is authorized.
+    Entra-->>LocalHost: Returns short-lived Access Token (JWT)
+    deactivate Entra
     
-    App->>Vault: 9. Accesses the vault using the Token instead of a password.
+    LocalHost-->>App: Delivers Token to .NET SDK
+    deactivate LocalHost
+    
+    App->>Vault: Calls Key Vault using the Token (No Passwords!)
+    activate Vault
+    Vault-->>App: Securely returns the secret
+    deactivate Vault
 
 ```
 
@@ -513,4 +529,11 @@ When presenting this architecture to stakeholders or security teams, here is how
 
 > **A:** The Managed Identity token can only be requested by pinging a specific, non-routable local IP address (`169.254.169.254`). This IP address is intercepted by the physical Azure Hypervisor hosting your VM or App Service. A hacker sitting in a coffee shop in another country cannot ping that IP address. Furthermore, the token it returns is only valid for a specific resource (like Azure SQL or Key Vault) and expires automatically in about 60 minutes.
 
+**Q: What is the exact boundary for using SPIFFE/mTLS versus Cloud Workload Identity (AWS IAM / Azure Managed Identities)?**
+
+> **A:** It entirely depends on **who owns the server receiving the request.**
+> * **Use SPIFFE / mTLS when you own BOTH the client and the server.** If your custom `.NET Thumbnail Maker` is calling your custom `.NET Storage API`, you control the code on both ends. You can easily configure the receiving web server (Kestrel) to intercept the connection, read the SPIFFE X.509 certificate, and validate its "DNA" (the SAN URI).
+> * **Use Cloud Workload Identity when you own the client, but the Cloud Provider owns the server.** If your app needs to talk to a Managed Service like AWS S3, AWS DynamoDB, or Azure Key Vault, you cannot rewrite Amazon or Microsoft's internal code to make them accept your custom SPIFFE certificate. Instead, you use Identity Federation to temporarily adopt *their* native credentials (IAM Roles or Entra ID tokens) to securely cross their proprietary borders.
+> 
+> 
 ---
