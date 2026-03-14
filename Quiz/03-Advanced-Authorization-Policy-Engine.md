@@ -198,7 +198,10 @@ public async Task<bool> EvaluateAsync(string subject, string action, string reso
 ```
 
 **Step 2: The Policy-as-Code (The Logic inside the PDP)**
+
 When the Policy Engine receives that JSON `input`, it evaluates it against a text file maintained by your security team (written in a language like Rego).
+
+**The Environment Fetching Magic:** Notice that the .NET API (PEP) passed the User's IP Address (an Environment attribute it already knew from the HTTP request), but it did *not* pass the Billing Status. Why? Because **the PDP can fetch its own Environment attributes dynamically**. Instead of your C# code querying the billing service, the Policy Engine makes that HTTP call itself during the evaluation. This is what keeps your .NET API completely free of data-fetching spaghetti code.
 
 To calculate the `allow` boolean, Rego uses an **Implicit AND**. Inside an `allow { ... }` block, every single line must evaluate to `true`. If even one line fails (e.g., the billing API returns "Suspended"), the entire block instantly fails, and the engine defaults to `false`.
 
