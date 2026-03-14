@@ -96,11 +96,34 @@ var response = await apiClient.PostAsync("https://api.partner.com/billing/upload
 
 ```
 
+
 **Where OAuth 2.0 Fails Internally (The Secret Zero Problem):**
 The Client Credentials flow is mathematically secure, but **it has a fatal flaw at cloud scale:** Where does the `Thumbnail Maker` keep the `ClientSecret`?
 
-1. **The Bootstrapping Paradox:** To get the temporary JWT, the application *still* needs a static `ClientSecret`. You haven't eliminated the static password; you just moved it. If you put it in a highly secure **Azure Key Vault** or **AWS Secrets Manager**... how does the `Thumbnail Maker` prove who it is to the Key Vault to unlock it? It needs a password to get the password. This infinite loop is the **Secret Zero Problem**.
-2. **The Bearer Vulnerability Remains:** If a hacker breaches your Windows Server, they can copy that `client_secret` to their own laptop in Russia, call Auth0, and get a valid token. The network cannot tell the difference between your Windows Server and the hacker's laptop, because they both possess the password.
+**1. The Bootstrapping Paradox:**
+To get the temporary JWT, the application *still* needs a static `ClientSecret`. You haven't eliminated the static password; you just moved it. If you put it in a highly secure **Azure Key Vault** or **AWS Secrets Manager**... how does the `Thumbnail Maker` prove who it is to the Key Vault to unlock it? It needs a password to get the password. This infinite loop is the **Secret Zero Problem**.
+
+**2. The Cloud-Native "Half-Solution" (Azure Managed Identities & AWS IAM Roles):**
+At this point, you might be thinking: *"Wait, if I run my Thumbnail Maker on an Azure App Service or an AWS EC2 instance, can't I just assign it a cloud-native role to read from the vault without a password?"*
+
+Yes! You absolutely can. Both major clouds have brilliant, built-in hypervisor solutions to bypass this paradox:
+
+* **Azure (Managed Identities):** You toggle on a "System Assigned Identity" for your App Service or VM. Azure creates an invisible Enterprise Application in Entra ID tied directly to that physical compute resource.
+* **AWS (IAM Roles & IMDS):** You attach an Instance Profile to an EC2 VM, relying on the Instance Metadata Service.
+
+In both cases, your `.NET` SDK makes a request to a hidden, non-routable local IP address (`169.254.169.254`). Because this IP doesn't exist on the public internet, the physical hypervisor hosting your application intercepts it. The hypervisor knows *exactly* which VM is making the request, validates its identity, and dynamically injects temporary cloud credentials into your app.
+
+This beautifully solves the Secret Zero problem **for Cloud APIs**. Your code boots up, asks the hypervisor for its built-in identity, and unlocks the Azure Key Vault or AWS Secrets Manager without ever holding a password.
+
+**3. The Bearer Vulnerability Remains (The Internal Gap):**
+However, Azure Managed Identities and AWS IAM Roles mean absolutely nothing to an external Identity Provider like Auth0, your partner's external billing API, or an on-premise application.
+
+To get your OAuth 2.0 token to call your external partner, you *still* have to extract that `ClientSecret` from the Azure Key Vault and hold it in the `.NET` app's memory to perform the OAuth exchange.
+
+This brings us back to the ultimate flaw: **The Bearer Vulnerability**. Even though you securely pulled the secret from the vault without a password, the secret is now sitting inside your application. If a hacker breaches your Azure VM or App Service, they can dump the memory, copy that `client_secret` to their own laptop in Russia, call Auth0, and get a valid token. The network cannot tell the difference between your Azure server and the hacker's laptop, because they both possess the secret.
+
+*(This exact vulnerability is why we must evolve to Phase 3: SPIFFE/SPIRE, where the identity is bound to the server itself using mTLS, and there are absolutely no secrets to extract from memory).*
+
 
 ---
 
