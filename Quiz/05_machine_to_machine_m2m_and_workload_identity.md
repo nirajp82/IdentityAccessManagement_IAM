@@ -187,10 +187,7 @@ spire-server.exe entry create `
 
 ```
 
-
 * **What this does:** It tells the central database: *"If a trusted Windows machine asks for an app identity, and the Windows Operating System itself guarantees the app making the request is running under the `DOMAIN\svc_thumbnailer` Windows account, generate the Thumbnail Maker certificate and send it over the network to them."*
-
----
 
 ---
 
@@ -359,7 +356,6 @@ You have achieved **Zero-Secret Architecture**. If a hacker breaches the server,
 *Architect's Rule of Thumb:* Use SPIFFE/SPIRE for **Internal** M2M traffic (Service A calling Service B inside your own network).
 
 ---
----
 
 ### Phase 4: Cloud Workload Identity (The Final Boss)
 
@@ -430,7 +426,6 @@ using GetObjectResponse response = await s3Client.GetObjectAsync(request);
 Console.WriteLine("Successfully pulled image data without static secrets!");
 
 ```
-
 ---
 
 #### Use Case B: Azure Managed Identities (Web API & Key Vault)
@@ -484,7 +479,6 @@ KeyVaultSecret secret = await client.GetSecretAsync("PartnerApiSecret");
 Console.WriteLine("Successfully pulled secret using Zero-Secret Azure Managed Identity!");
 
 ```
-
 ---
 
 ## Whiteboard FAQ: Defending the Architecture
