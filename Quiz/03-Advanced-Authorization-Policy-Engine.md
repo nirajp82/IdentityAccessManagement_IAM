@@ -254,7 +254,6 @@ When the engine finishes evaluating, it wraps the final boolean in a JSON respon
 * **Centralized Auditing:** You now have a single repository of policy files that prove exactly who has access to what, which makes passing compliance audits (SOC2, HIPAA) trivial.
 
 ---
-
 ### Phase 5: Solving Data Latency (ReBAC & Google Zanzibar)
 
 In Phase 4, we decoupled the logic into the PDP. But we have a new problem: **Data Latency**. If the Policy Engine has to query a traditional SQL database to figure out if Alice is a "Folder Admin", the authorization check will still be too slow. We need ultra-fast data retrieval.
@@ -263,7 +262,7 @@ In Phase 4, we decoupled the logic into the PDP. But we have a new problem: **Da
 
 When Google built Google Drive, they realized standard authorization was mathematically impossible to scale. If you have billions of files and deeply nested folders, an API cannot run a 5-table SQL `JOIN` every time someone clicks a document. It would take seconds. Google needed to evaluate complex, nested permissions globally in **under 10 milliseconds**.
 
-To do this, they published the **Zanzibar Paper**. They abandoned relational tables entirely and built a globally distributed **Graph Database** purpose-built exclusively for permissions. This model is called **Relationship-Based Access Control (ReBAC)**.
+To do this, they published the **Zanzibar Paper**. They abandoned relational tables entirely and built a globally distributed **Graph Database** purpose-built exclusively for permissions (open-source implementations include **SpiceDB**). This model is called **Relationship-Based Access Control (ReBAC)**.
 
 #### The Secret Sauce: The Tuple
 
@@ -278,58 +277,150 @@ If we map an infrastructure into Zanzibar tuples, it looks like this:
 
 Because this is a graph, the database traverses relationships instantly. If Alice tries to access `image:123`, the system does a sub-millisecond graph traversal: Who owns the image? (Folder Alpha). Does Alice have a relationship to Folder Alpha? (Yes).
 
-#### Use Case: The Lambda Scenario (Alice and the High-Res Thumbnails)
+#### Use Case: The Lambda Scenario (Generating & Saving Across Regions)
 
-**The Scenario:** Alice is a "Folder Viewer" for Project Alpha, but she needs to be temporarily elevated to "Folder Admin" to trigger a massive batch generation of High-Res Thumbnails. Furthermore, the API must verify the customer's billing account isn't suspended.
+**The Scenario:** Alice is a "Folder Viewer" for Project Alpha, but she needs to trigger a massive batch generation of High-Res Thumbnails. Once generated, the business logic dictates she must save the outputs into a completely different, heavily restricted regional folder named `Generated_Thumbnail_eu`. Furthermore, the API must verify the customer's billing account isn't suspended.
 
-1. **The Elevation:** We do not touch Alice's JWT or Auth0 profile. We simply write a new relationship tuple to the Zanzibar database: `folder:alpha#admin@alice`. We set a Time-To-Live (TTL) on this tuple so it automatically deletes itself after 4 hours.
-2. **The Request:** Alice clicks "Generate Thumbnails".
+This is a complex, multi-resource authorization check. The system must verify she has permission to **read/process** from the source, AND **write** to the destination.
+
+**1. The Tuples (The Graph Setup):**
+We do not touch Alice's JWT or Auth0 profile. The graph database already holds her destination permission, and we temporarily elevate her source permission:
+
+* *Temporary Elevation:* We write a new relationship tuple: `folder:alpha#admin@alice` with a 4-hour Time-To-Live (TTL).
+* *Existing Destination Rule:* The graph already knows `folder:Generated_Thumbnail_eu#writer@alice`.
+
+**2. The Request:** Alice clicks "Generate & Save to EU".
+
+When the `.NET API` (PEP) receives this request, it passes *both* resources to the Open Policy Agent (PDP) in its context payload. OPA then queries the SpiceDB (Zanzibar) graph twice in parallel to verify both relationships exist.
 
 ```mermaid
 sequenceDiagram
     autonumber
     
-    box rgba(128, 128, 128, 0.1) Client & API
+    box rgba(128, 128, 128, 0.1) Application Layer
         participant Alice as Alice (Client)
         participant API as .NET API (Gateway/PEP)
     end
-    box rgba(128, 128, 128, 0.15) Policy Engine
+    box rgba(128, 128, 128, 0.15) Policy Layer
         participant OPA as OPA Sidecar (PDP)
     end
-    box rgba(128, 128, 128, 0.1) Data & Attributes
+    box rgba(128, 128, 128, 0.1) Data Layer
         participant SpiceDB as Zanzibar DB (ReBAC Graph)
         participant Billing as Billing API (ABAC Attributes)
     end
 
-    Alice->>API: POST /folders/b/thumbnails/generate
+    Alice->>API: POST /thumbnails/generate-and-save
     
-    Note over API: The .NET API is "dumb". It just extracts Context.
+    Note over API: The .NET API extracts Context.<br/>Source: folder_alpha, Dest: folder_eu
     
-    API->>OPA: Ask: {subject: "Alice", action: "generate_thumbnail", resource: "folder_b"}
+    API->>OPA: Ask: {subject: "Alice", action: "generate_and_save", source: "folder_alpha", dest: "folder_eu"}
     activate OPA
     
-    Note over OPA: OPA evaluates the centralized Rego policy file.
+    Note over OPA: OPA evaluates the Rego policy file.
     
-    OPA->>SpiceDB: GraphCheck: `folder_b#admin@alice` exist?
-    activate SpiceDB
-    SpiceDB-->>OPA: Returns: TRUE (Temporary elevation tuple found in <2ms)
-    deactivate SpiceDB
+    par Zanzibar Graph Traversal
+        OPA->>SpiceDB: Check 1: `folder_alpha#admin@alice` exist?
+        SpiceDB-->>OPA: Returns: TRUE (<2ms)
+        
+        OPA->>SpiceDB: Check 2: `folder_eu#writer@alice` exist?
+        SpiceDB-->>OPA: Returns: TRUE (<2ms)
+    end
     
-    OPA->>Billing: Attribute Check: Is `folder_b` billing == active?
+    OPA->>Billing: Attribute Check: Is billing == active?
     activate Billing
     Billing-->>OPA: Returns: TRUE
     deactivate Billing
     
-    Note over OPA: Both conditions met.
+    Note over OPA: All Source, Destination, and Attribute conditions met.
     OPA-->>API: Response: { "allow": true }
     deactivate OPA
     
-    API->>API: Execute Business Logic (Generate Thumbnails)
-    API-->>Alice: 200 OK (Thumbnails are processing)
-
+    API->>API: Execute Business Logic (Generate & Save to EU)
+    API-->>Alice: 200 OK (Thumbnails are processing and saving)
 
 ```
 
+**Why this is so powerful:**
+If Alice did not have the `writer` relationship to the `Generated_Thumbnail_eu` folder, the second SpiceDB check would fail instantly. OPA would return `{"allow": false}`, and the .NET API would block the request before a single byte of image data was ever processed or moved across regions. This guarantees strict data residency and access control using sub-millisecond graph lookups.
+
+---
+
+#### 🛠️ Deep Dive: How Zanzibar Actually Works (The Code)
+
+To make Zanzibar work in your architecture, you don't build SQL tables. You write a **Schema** defining the relationships, and you use an SDK to write **Tuples**.
+
+**1. The Zanzibar Schema (Stored in SpiceDB)**
+Just like defining a SQL schema, your security team defines the relationships that are mathematically possible in your system.
+
+```text
+definition user {}
+
+definition folder {
+    relation admin: user
+    relation writer: user
+    relation viewer: user
+    
+    # Zanzibar can dynamically compute permissions!
+    # If you are an admin, you automatically inherit writer permissions.
+    permission write = writer + admin
+}
+
+```
+
+**2. The .NET Implementation: Writing the Tuple**
+Remember Step 1 of our scenario where we "temporarily elevated" Alice to a Folder Admin? We didn't update a SQL database. A specialized .NET Identity microservice simply pushed a Tuple into SpiceDB using gRPC.
+
+Here is the exact C# code using the official `Authzed` (SpiceDB) NuGet package:
+
+```csharp
+using Authzed.Api.V1;
+using Grpc.Net.Client;
+
+public class AccessElevationService
+{
+    private readonly PermissionsService.PermissionsServiceClient _spiceDbClient;
+
+    public AccessElevationService()
+    {
+        // 1. Connect to the high-performance Zanzibar gRPC cluster
+        var channel = GrpcChannel.ForAddress("https://spicedb.internal:50051");
+        _spiceDbClient = new PermissionsService.PermissionsServiceClient(channel);
+    }
+
+    public async Task ElevateToAdminAsync(string userId, string folderId)
+    {
+        // 2. We are writing the Relationship Tuple: folder:{folderId}#admin@user:{userId}
+        var request = new WriteRelationshipsRequest
+        {
+            Updates =
+            {
+                new RelationshipUpdate
+                {
+                    Operation = RelationshipUpdate.Types.Operation.Create,
+                    Relationship = new Relationship
+                    {
+                        // The Resource (Object)
+                        Resource = new ObjectReference { ObjectType = "folder", ObjectId = folderId },
+                        // The Action (Relation)
+                        Relation = "admin",
+                        // The Subject (User)
+                        Subject = new SubjectReference { 
+                            Object = new ObjectReference { ObjectType = "user", ObjectId = userId } 
+                        }
+                    }
+                }
+            }
+        };
+
+        // 3. Write to the Graph DB instantly
+        await _spiceDbClient.WriteRelationshipsAsync(request);
+        Console.WriteLine($"Successfully elevated {userId} to admin on folder {folderId}");
+    }
+}
+
+```
+
+**The Beauty of the Graph:** Because we executed that C# code, the relationship now mathematically exists in the graph. The next time the .NET API asks OPA, *"Can Alice save to this folder?"*, OPA executes a blazing-fast gRPC `CheckPermission` call against SpiceDB. SpiceDB sees the tuple we just inserted and returns `true` in 2 milliseconds.
 ---
 
 ### Phase 6: Surviving the "Hot Path" (Caching, Latency, and Scale)
