@@ -359,6 +359,7 @@ You have achieved **Zero-Secret Architecture**. If a hacker breaches the server,
 *Architect's Rule of Thumb:* Use SPIFFE/SPIRE for **Internal** M2M traffic (Service A calling Service B inside your own network).
 
 ---
+---
 
 ### Phase 4: Cloud Workload Identity (The Final Boss)
 
@@ -375,48 +376,48 @@ You cannot use SPIFFE here (AWS and Azure do not speak it natively), and you **s
 
 ---
 
-#### Use Case A: AWS IRSA (The Distributed Thumbnail Job)
+#### Use Case A: AWS EC2 IAM Roles (The Windows VM)
 
-**Scenario:** To scale up, you move the `.NET Thumbnail Maker` to a distributed Kubernetes cluster running 100 pods. Instead of calling your internal API, these pods now need to securely pull the 50MB raw images directly from a private **AWS S3 bucket** without hardcoding AWS Access Keys in the container image.
+**Scenario:** You are hosting the `.NET Thumbnail Maker` as a Windows Service on an **AWS EC2 Windows Server**. The app needs to securely pull the 50MB raw images directly from a private **AWS S3 bucket** without hardcoding AWS Access Keys in the `appsettings.json` or Windows Environment Variables.
 
-**The Concept (The Diplomatic Passport):** Since AWS doesn't know who your Kubernetes pod is natively, we set up a trust relationship. Kubernetes acts as the government, issuing a temporary "Passport" (an OIDC Web Identity Token / JWT) to the pod. AWS is configured to say: *"I trust the Kubernetes government. If anyone shows up with a valid Passport from them, I will let them in."*
+**The Concept (The Hypervisor Trust):** Because Amazon owns the physical hardware (the Nitro Hypervisor) that your Windows VM is running on, they can establish a deeply integrated trust. You attach an "IAM Role" directly to the EC2 instance in the AWS Console. AWS *knows* exactly which physical server is running your application.
 
 **The Flow:**
-Here is exactly how the exchange happens under the hood:
+Here is exactly how the exchange happens under the hood without you typing a password:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Pod as Thumbnail Pod (K8s)
-    participant Kube as Kubernetes API (OIDC Provider)
+    participant App as Thumbnail Maker (Windows EC2)
+    participant LocalHost as EC2 Instance Metadata Service (IMDS)
     participant AWS_STS as AWS Security Token Service
     participant S3 as AWS S3 Bucket
 
-    Note over Pod,Kube: 1. Pod is assigned a K8s "ServiceAccount"
-    Kube->>Pod: 2. Mounts a projected OIDC Web Identity Token (JWT) into the pod's file system.
+    Note over App,AWS_STS: 1. You attach an IAM Role to the EC2 Instance in AWS.
     
-    Note over Pod: 3. Thumbnail script uses the AWS SDK to call S3.
-    Note over Pod: 4. SDK automatically finds the JWT and initiates Exchange.
+    Note over App: 2. The .NET app asks the AWS SDK to download an S3 image.
+    Note over App: 3. The SDK sees it has no hardcoded passwords.
     
-    Pod->>AWS_STS: 5. AssumeRoleWithWebIdentity (Passes the K8s JWT)
+    App->>LocalHost: 4. SDK automatically pings a hidden localhost IP (169.254.169.254) managed by the AWS Hypervisor.
+    LocalHost->>AWS_STS: 5. "This specific EC2 VM requested temporary credentials for its attached IAM Role."
     
-    Note over AWS_STS: 6. AWS verifies the JWT signature using the K8s OIDC public keys.
-    AWS_STS-->>Pod: 7. Returns Temporary AWS Credentials valid for 1 hour.
+    Note over AWS_STS: 6. AWS verifies the physical VM matches the Role.
+    AWS_STS-->>App: 7. Returns highly secure, short-lived AWS Credentials (valid for ~1 hour).
     
-    Pod->>S3: 8. Download 50MB Raw Image (using Temporary Credentials)
-    S3-->>Pod: 9. 200 OK
+    App->>S3: 8. Download 50MB Raw Image (using Temporary Credentials)
+    S3-->>App: 9. 200 OK
 
 ```
 
-**The .NET Implementation (Zero-Code Auth):** When Kubernetes injects the OIDC token into the pod's file system, the AWS SDK automatically detects it via the `DefaultAWSCredentialsChain`. You do not write any complex authentication code or token exchange logic. The SDK handles the background call to AWS STS entirely on its own.
+**The .NET Implementation (Zero-Code Auth):** When the AWS SDK executes, it uses a built-in feature called the `DefaultAWSCredentialsChain`. It automatically detects it is running on an EC2 instance, pings the hypervisor, and handles the background call to AWS STS entirely on its own. You do not write any complex authentication code.
 
 ```csharp
 using Amazon.S3;
 using Amazon.S3.Model;
 
 // 1. Initialize the S3 Client. 
-// We DO NOT pass any credentials here. The SDK automatically reads the K8s JWT, 
-// calls AWS STS behind the scenes, and caches the temporary credentials!
+// We DO NOT pass any credentials here. The SDK automatically pings the EC2 
+// Instance Metadata Service (IMDS), fetches the temp keys, and caches them!
 var s3Client = new AmazonS3Client();
 
 var request = new GetObjectRequest
@@ -434,7 +435,7 @@ Console.WriteLine("Successfully pulled image data without static secrets!");
 
 #### Use Case B: Azure Managed Identities (Web API & Key Vault)
 
-**Scenario:** You decide to host the `.NET Thumbnail Maker` in **Azure App Service**. Remember that `PARTNER_API_SECRET` from Phase 2 that we needed to send billing data to the external partner? The app needs to securely pull that exact secret from **Azure Key Vault** so it can perform the OAuth Client Credentials flow.
+**Scenario:** You decide to host the `.NET Thumbnail Maker` in **Azure App Service** (or an Azure Windows VM). Remember that `PARTNER_API_SECRET` from Phase 2 that we needed to send billing data to the external partner? The app needs to securely pull that exact secret from **Azure Key Vault** so it can perform the OAuth Client Credentials flow.
 
 **The Concept (The Invisible Trust):** Because Microsoft owns both the Azure App Service (where your code runs) and the Azure Key Vault (where the secret lives), they can establish a deeply integrated trust. Azure *knows* exactly which physical server is running your application at the hypervisor level.
 
