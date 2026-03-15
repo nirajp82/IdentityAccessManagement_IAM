@@ -52,7 +52,7 @@ Acme Corp's IT Admin takes this URL and Token, logs into *their* Azure AD portal
 
 Once connected, Acme Corp's Azure AD effectively becomes the "Puppet Master." Your Thumbnail Maker API simply listens for standardized SCIM commands and updates your database accordingly.
 
-The following **Mermaid Sequence Diagram** illustrates the automated end-to-end operational flow when an employee lifecycle event occurs (using a Termination scenario as the primary example):
+The automated end-to-end operational flow when an employee lifecycle event occurs (using a Termination scenario as the primary example):
 
 ```mermaid
 sequenceDiagram
@@ -69,7 +69,7 @@ sequenceDiagram
     AAD->>WD: scheduled API Call: GET Workday HR data changes
     WD-->>AAD: Response: Alice Smith status changed to 'Terminated'
 
-    Box rgba(255, 0, 0, 0.1) The AUTOMATED PUSH (Lifecycle Event Execution)
+    rect rgb(255, 230, 230)
         Note right of AAD: (1) AAD disables Alice's corporate account identity.
         
         AAD->>TM_API: (2) SCIM PUSH (Backend-to-Backend Call):<br/>PATCH /Users/{id}<br/>Authorization: Bearer [Tenant_Specific_Token_1]<br/>Payload: { active: false }
@@ -91,7 +91,6 @@ sequenceDiagram
     end
 
 ```
-
 ### Explanation of the Diagram's Operational Flow:
 
 1. **HR Event:** An employee lifecycle event (like a termination, hire, or name change) occurs in Acme Corp's core system of record (e.g., Workday HR software).
