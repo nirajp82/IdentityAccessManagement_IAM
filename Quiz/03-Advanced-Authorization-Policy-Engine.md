@@ -440,34 +440,115 @@ The logic is baked directly into the **Definition**. When the .NET API asks: *"C
 
 ---
 
-##### 6️⃣ C# Example: How to Insert a Row (Write a Tuple)
+##### 6️⃣ C# Example: How to Insert a Row (Write a Tuple) and Check Permission
 
-In SQL, you use `INSERT INTO`. In Zanzibar (SpiceDB), you use `WriteRelationships`. This adds the relationship arrow to the graph.
+To implement this in a real-world scenario, we need two distinct gRPC services from the SpiceDB (Zanzibar) API:
+
+1. **`WriteRelationships`**: To "Insert" the row (Tuple).
+2. **`CheckPermission`**: To "Query" the graph and see if the math adds up.
+
+Here is the expanded `.NET` class. I have added a generic method to assign roles and a validation method to check access for multiple users.
 
 ```csharp
-// Adding "Alice" to the "Writer" ROLE for "Folder Alpha"
-var update = new RelationshipUpdate
-{
-    Operation = RelationshipUpdate.Types.Operation.Create,
-    Relationship = new Relationship
-    {
-        // THE OBJECT (The Container)
-        Resource = new ObjectReference { ObjectType = "folder", ObjectId = "alpha" },
-        
-        // THE RELATION (The Role)
-        Relation = "writer",
-        
-        // THE SUBJECT (The User)
-        Subject = new SubjectReference { 
-            Object = new ObjectReference { ObjectType = "user", ObjectId = "alice" } 
-        }
-    }
-};
+using Authzed.Api.V1;
+using Grpc.Net.Client;
 
-await _spiceDbClient.WriteRelationshipsAsync(new WriteRelationshipsRequest { Updates = { update } });
+public class FolderSecurityService
+{
+    private readonly PermissionsService.PermissionsServiceClient _spiceDbClient;
+
+    public FolderSecurityService(string spiceDbUrl)
+    {
+        var channel = GrpcChannel.ForAddress(spiceDbUrl);
+        _spiceDbClient = new PermissionsService.PermissionsServiceClient(channel);
+    }
+
+    /// <summary>
+    /// Phase 5.1: "Writing the Tuple"
+    /// This acts like a SQL INSERT, creating the relationship in the graph.
+    /// </summary>
+    public async Task AssignFolderRoleAsync(string userId, string folderId, string role)
+    {
+        var request = new WriteRelationshipsRequest
+        {
+            Updates =
+            {
+                new RelationshipUpdate
+                {
+                    Operation = RelationshipUpdate.Types.Operation.Create,
+                    Relationship = new Relationship
+                    {
+                        Resource = new ObjectReference { ObjectType = "folder", ObjectId = folderId },
+                        Relation = role,
+                        Subject = new SubjectReference {
+                            Object = new ObjectReference { ObjectType = "user", ObjectId = userId }
+                        }
+                    }
+                }
+            }
+        };
+
+        await _spiceDbClient.WriteRelationshipsAsync(request);
+    }
+
+    /// <summary>
+    /// Phase 5.2: "Checking Permission"
+    /// This is the logic that OPA (the PDP) would call to verify access.
+    /// </summary>
+    public async Task<bool> CanUserWriteToFolderAsync(string userId, string folderId)
+    {
+        var request = new CheckPermissionRequest
+        {
+            Resource = new ObjectReference { ObjectType = "folder", ObjectId = folderId },
+            Permission = "write", // This matches the 'permission write' in our Schema
+            Subject = new SubjectReference {
+                Object = new ObjectReference { ObjectType = "user", ObjectId = userId }
+            }
+        };
+
+        var response = await _spiceDbClient.CheckPermissionAsync(request);
+        
+        // Returns true if the user has a valid 'writer' or 'admin' relationship tuple
+        return response.Permissionship == CheckPermissionResponse.Types.Permissionship.HasPermission;
+    }
+}
 
 ```
 
+### 🧪 Executing the Scenario
+
+Here is how the logic plays out in your application code:
+
+```csharp
+var security = new FolderSecurityService("https://spicedb.internal:50051");
+
+// 1. We ONLY write one row (Tuple) for Alice
+await security.AssignFolderRoleAsync("alice", "alpha", "writer");
+
+// 2. We check Alice
+bool aliceCanWrite = await security.CanUserWriteToFolderAsync("alice", "alpha");
+Console.WriteLine($"Does Alice have access? {aliceCanWrite}"); 
+// Output: True (Found the Tuple: folder:alpha#writer@user:alice)
+
+// 3. We check John
+bool johnCanWrite = await security.CanUserWriteToFolderAsync("john", "alpha");
+Console.WriteLine($"Does John have access? {johnCanWrite}"); 
+// Output: False (Mathematical Denial: No relationship found in the graph)
+
+```
+
+### Why John is denied (The Logic)
+
+When the `.NET` client calls `CheckPermission` for **John**, Zanzibar executes the "Math" defined in your schema: `permission write = writer + admin`.
+
+1. It searches the graph for `folder:alpha#writer@user:john` → **Not Found**.
+2. It searches the graph for `folder:alpha#admin@user:john` → **Not Found**.
+3. Because **0 + 0 = 0**, it returns `Permissionship.NoPermission`.
+
+This demonstrates the **Zero Trust** nature of Zanzibar: Unless a specific relationship tuple is written for a user, they are fundamentally invisible to the resource.
+
+##### how to handle a **"Hard Revocation"** for Alice? 
+In Zanzibar, this is as simple as deleting the Tuple, which instantly causes the next `CheckPermission` call to return `False` globally.
 ---
 
 ##### 7️⃣ How the Permission Logic Queries the Rows
