@@ -31,13 +31,76 @@ JIT is purely a "pull" mechanism—it only triggers when the user actively tries
 * **Zombie Accounts & Backdoors:** If the IT admin forgets, Alice becomes a "Zombie Account." Even though she can no longer use the SSO front door, your database still considers her an active employee. If she previously generated a permanent API key or has a 30-day session cookie saved on her personal phone, she can continue extracting sensitive data through the back door long after she was fired.
 ---
 
-### Phase 2: The SCIM Architecture (System for Cross-domain Identity Management)
+### Phase 2: The SCIM (System for Cross-domain Identity Management) Architecture (B2B SaaS Integration)
 
-SCIM (RFC 7644) solves the JIT problem by moving from a "Pull" to a **"Push"** model.
+#### The "Universal Translator" Concept
 
-SCIM is a standardized REST API that you build into your `.NET` backend. You give the enterprise customer a secret Bearer Token and your API URL (`https://api.yoursaas.com/scim/v2`).
+Every Identity Provider (IdP) and SaaS application uses a different database structure. To bridge this gap, you, as the builder of the **Thumbnail Maker SaaS application**, must implement the **SCIM standard (RFC 7644)**. This standard acts as a "Universal Translator," enforcing a strict, standardized REST API structure and JSON schema that ensures any corporate enterprise Identity Provider (like Acme Corp's Azure AD) can communicate user lifecycle changes directly to your application without human intervention.
 
-Now, Azure AD or Okta acts as the puppet master. The millisecond an HR event happens, the Identity Provider (IdP) pushes an HTTP request directly to your API.
+#### Setup (The Handshake)
+
+When Acme Corp purchases a license for your software, their internal IT Administrator needs to connect their internal user directory (Azure AD) to your platform. To securely authorize this connection, you provide the Acme Corp IT Admin with two critical pieces of infrastructure data:
+
+1. **Your SCIM Base URL:** A dedicated API endpoint route hosted on your servers (e.g., `https://api.thumbnailmaker.com/scim/v2`).
+2. **A Long-Lived Bearer Token:** A cryptographically secure API key that you generate specifically for Acme Corp. This token authenticates Acme Corp's Azure AD and ensures that the incoming data is written strictly into Acme Corp's secure database shard on your end, preventing any cross-tenant data leakage.
+
+Acme Corp's IT Admin takes this URL and Token, logs into *their* Azure AD portal, and establishes the persistent backend-to-backend pipeline.
+
+#### Automated Operational Flow (Lifecycle Events)
+
+Once connected, Acme Corp's Azure AD effectively becomes the "Puppet Master." Your Thumbnail Maker API simply listens for standardized SCIM commands and updates your database accordingly.
+
+The following **Mermaid Sequence Diagram** illustrates the automated end-to-end operational flow when an employee lifecycle event occurs (using a Termination scenario as the primary example):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant WD as Acme Corp (HR: Workday)
+    participant AAD as Acme Corp (IdP: Azure AD)
+    participant TM_API as Thumbnail Maker SaaS API<br/>(Endpoint: https://api.thumbnailmaker.com/scim/v2)
+    participant TM_DB as SaaS Database<br/>(AcmeCorp Tenant Shard)
+    participant TM_IS as SaaS Internal Services<br/>(Session Revocation/Kill Switch)
+
+    Note over AAD, TM_API: PRE-REQUISITE (Setup Phase): IT Admin has pasted Base URL & Bearer Token into Azure AD.
+
+    Note over AAD: Polled Inbound Provisioning Integration (e.g., Every ~40 mins)
+    AAD->>WD: scheduled API Call: GET Workday HR data changes
+    WD-->>AAD: Response: Alice Smith status changed to 'Terminated'
+
+    Box rgba(255, 0, 0, 0.1) The AUTOMATED PUSH (Lifecycle Event Execution)
+        Note right of AAD: (1) AAD disables Alice's corporate account identity.
+        
+        AAD->>TM_API: (2) SCIM PUSH (Backend-to-Backend Call):<br/>PATCH /Users/{id}<br/>Authorization: Bearer [Tenant_Specific_Token_1]<br/>Payload: { active: false }
+        activate TM_API
+        
+        TM_API->>TM_DB: (3) EXECUTE LOGIC:<br/>UPDATE Users SET IsActive = false<br/>WHERE ExternalId = {aad_id}
+        TM_DB-->>TM_API: Success: SaaS DB Updated.
+        
+        TM_API->>TM_IS: (4) TRIGGER KILL SWITCH:<br/>Publish "Hard Revoke" Event for Alice
+        
+        par Parallel Action Execution
+            TM_IS-->>TM_IS: Instantly Revoke Active Web Session Cookies
+        and
+            TM_IS-->>TM_IS: Instantly Revoke Hardcoded API Keys
+        end
+
+        TM_API-->>AAD: (5) Response: 200 OK (User Disabled Globally)
+        deactivate TM_API
+    end
+
+```
+
+### Explanation of the Diagram's Operational Flow:
+
+1. **HR Event:** An employee lifecycle event (like a termination, hire, or name change) occurs in Acme Corp's core system of record (e.g., Workday HR software).
+2. **IdP Sync:** Acme Corp's Azure AD continuously "polls" (monitors) the HR API for profile updates. When it detects the change, it processes it internally (disabling the user's primary corporate access).
+3. **SCIM PUSH (BACKEND-TO-BACKEND):** Since Azure AD is securely linked to your application via SCIM, its provisioning engine immediately fires a standardized HTTP request (POST, PUT, or PATCH) directly to your **Thumbnail Maker API** over the internet, using the secret Bearer Token for authentication. **Crucially, this entire process occurs without the user ever logging in or taking any action.**
+4. **Database Execution (Onboarding/Offboarding):**
+	* **Hirings:** A `POST /Users` command causes your API to *pre-provision* a dormant user account immediately, allowing Acme Corp admins to pre-assign licenses and workspaces before the user's first day.
+	* **Terminations (Illustrated above):** A `PATCH /Users` command causes your API to *instantly disable* the user's status in your SaaS database.
+5. **Audit & Verification:** Your API sends a 200 OK confirmation back to Azure AD, completing the cycle and ensuring Acme Corp has a permanent audit trail of who has access to your platform.
+
+---
 
 #### The Core SCIM Endpoints
 
