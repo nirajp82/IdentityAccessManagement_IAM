@@ -21,6 +21,29 @@ Attackers buy databases of billions of leaked passwords from other website breac
 For years, the industry relied on Time-based One-Time Passwords (TOTP), like the 6-digit codes from Google Authenticator.
 **The fatal flaw:** These are easily defeated by AiTM attacks. A hacker sends an engineer an email linking to `thunbnail-maker.com` (notice the typo). The fake site acts as a proxy. The engineer types their password and their 6-digit code. The proxy instantly forwards those to the *real* site, logs in, steals the session cookie, and the hacker now has full access.
 
+This is one of the most dangerous attacks because it bypasses the "security" people think they have with those 6-digit codes.
+
+To understand an **Adversary-in-the-Middle (AiTM)** attack, stop thinking of it as a "fake website" that just steals a password. Think of it as a **"Man-in-the-Middle Proxy"** that sits between you and the real website, passing messages back and forth in real-time.
+
+### The Step-by-Step "Shadow" Attack
+
+Imagine an engineer at Acme Corp wants to log into the **Thumbnail Maker**.
+
+1. **The Bait:** The hacker sends an email: *"Urgent: Security Update for Thumbnail Maker."* The link goes to `thunbnail-maker.com` (note the extra 'n').
+2. **The Proxy:** The hacker isn't just hosting a static page. They are running a server that acts like a mirror. When the engineer opens that link, the hacker's server reaches out to the **REAL** `thumbnail-maker.com` and displays its login page to the user.
+3. **The Password Steal:** The engineer types their password. The hacker's server captures it and simultaneously types it into the real site.
+4. **The MFA Trap:** The real site asks for the 6-digit Google Authenticator code. The engineer sees this on the fake site, generates the code on their phone, and types it in.
+5. **The Hand-off:** The hacker’s server takes that 6-digit code and sends it to the real site **immediately** (before it expires).
+6. **The Victory:** The real site says, "Correct!" and sends back a **Session Cookie** (the master key that keeps you logged in). The hacker's proxy catches that cookie, keeps a copy for the hacker, and then hands it to the engineer so they don't suspect anything.
+
+### Why TOTP (6-digit codes) fails
+
+The 6-digit code doesn't know *where* it is being entered. It only knows *when*. As long as the hacker can relay that code to the real site within 30 seconds, the real site thinks the engineer is the one logging in.
+
+### Why WebAuthn / FIDO2 (YubiKeys) wins
+
+This is the "Advanced MFA" we talked about. When you use a hardware key or FaceID (WebAuthn), the browser tells the key: *"I am at `thunbnail-maker.com`."* The hardware key looks at its internal memory and says: *"Wait, I was registered for `thumbnail-maker.com`. This is a different domain. I refuse to sign this request."* Because the security is tied to the **Domain Name (Origin)** via a cryptographic handshake, the hacker's proxy cannot "forward" the signature. The attack stops dead.
+
 To defeat these, we must upgrade our architecture at the network edge and at the identity layer.
 
 ---
