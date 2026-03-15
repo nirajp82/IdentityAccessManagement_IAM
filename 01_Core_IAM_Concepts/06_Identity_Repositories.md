@@ -177,13 +177,18 @@ For external apps like Slack, the Access Plane acts as the **IdP** (Identity Pro
 
 * **The Security Benefit:** Slack never sees Alice's password. Even if Slack is breached, our credentials remain safe within the Access Plane.
 
-#### 3. Cloud Workloads (AWS / GCP / Azure)
+#### 3. Cloud Infrastructure Federation (AWS)**
 
-Engineers use **Identity Federation** to avoid the risks of long-lived "IAM User" Access Keys.
+Engineers use **Identity Federation** to strictly avoid the massive security risks associated with long-lived, permanent "IAM User" Access Keys (which can easily be leaked in source code or compromised). Instead, they rely on the Access Plane to broker ephemeral, short-lived sessions.
 
-* **The Technical Flow:** Alice logs into the SSO dashboard and clicks "AWS Console."
-* **The Mapping:** The Access Plane (**IdP**) passes a token to AWS (**SP**) that includes her **AD Group membership**. AWS maps her "Engineering-Lead" group to a specific **AWS IAM Role**.
-* **The Experience:** AWS grants her a **temporary session** (e.g., 1 hour). When that hour expires, her laptop must re-verify its **PRT** with the Access Plane to get a new session. No permanent keys exist to be stolen.
+**The Cryptographic Flow & Role Mapping:**
+
+1. **The Initiation:** Alice logs into her company's SSO dashboard (the **Access Plane / IdP**) and clicks the "AWS Console" app tile.
+2. **The Authentication & Assertion:** Just like the Slack example, the Access Plane verifies her identity seamlessly using her laptop's PRT. Once verified, the IdP generates a signed digital voucher (a SAML Assertion or OIDC token). Crucially, this voucher includes her corporate attributes, such as her group membership (e.g., `"Group": "Engineering-Lead"`).
+3. **The Handoff & Validation:** The browser forwards this signed voucher to AWS (the **Service Provider / SP**). AWS uses MoneyGuard's previously shared Public Key to mathematically verify the signature on the voucher.
+4. **The Role Mapping (The Translation):** AWS does not have a persistent user account named "Alice." Instead, the AWS Security Token Service (STS) reads the group attribute inside the validated voucher. It consults its internal trust policies and dynamically maps the `"Engineering-Lead"` corporate group to a specific **AWS IAM Role** (which holds the actual cloud permissions).
+5. **The Ephemeral Session (AssumeRole):** Because the mapping is successful, AWS STS dynamically generates a set of **Temporary Security Credentials** (a temporary Access Key, Secret Key, and Session Token) and grants Alice access to the console. These keys are strictly time-bound, usually set to expire in exactly 1 hour.
+6. **The Expiration:** The moment that 1-hour window closes, those temporary AWS keys instantly self-destruct and become cryptographically useless to anyone, even if a hacker copied them. To keep working, Alice's browser or CLI must seamlessly re-verify her PRT with the Access Plane to get a fresh voucher and a new 1-hour session. At no point do permanent keys exist to be stolen.
 
 #### 4. Modern Microservices (.NET Core / Node.js)
 
