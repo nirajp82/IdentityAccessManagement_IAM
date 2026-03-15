@@ -46,14 +46,28 @@ This is the "Advanced MFA" we talked about. When you use a hardware key or FaceI
 
 To defeat these, we must upgrade our architecture at the network edge and at the identity layer.
 
-### 1. The Registration: "The Digital Marriage"
+## 1. The Registration: "The Digital Marriage"
 
-When you first set up your YubiKey or FaceID for the **Thumbnail Maker**, a unique pair of keys is created:
+When you first set up a YubiKey or FaceID for the **Thumbnail Maker**, you aren't just "setting a password." You are performing a cryptographic ceremony that creates a permanent, secure bond between your device and the website.
 
-* **The Private Key:** Stays locked inside the secure hardware chip of your key or phone. It never leaves.
-* **The Public Key:** Sent to the Thumbnail Maker’s server and stored in your user profile.
+### The Two Halves of the Whole
 
-**The Secret Sauce:** During this setup, the browser sends the **Relying Party ID (RP ID)**—which is the domain `thumbnail-maker.com`—to the hardware key. The key saves this domain inside its secure storage, essentially "marrying" that credential to that specific URL.
+During this process, a unique pair of mathematical keys is generated. They work like a specialized lock and key set:
+
+* **The Private Key:** This is the "soul" of the credential. It stays locked inside the secure hardware chip (Secure Enclave) of your phone or YubiKey. **It never leaves the device.** Even if a hacker compromised your entire operating system, they couldn't "copy" this key.
+* **The Public Key:** This is sent to the **Thumbnail Maker’s server** and stored in your user profile. Think of this as the "lock" that only your specific Private Key can open.
+
+### The Secret Sauce: Domain Binding
+
+What makes this a "marriage" rather than just a digital handshake is the **Relying Party ID (RP ID)**.
+
+1. **The Handover:** During setup, the browser sends the domain—`thumbnail-maker.com`—directly to your hardware key.
+2. **The Vow:** The hardware key saves this specific domain inside its secure storage.
+3. **The Result:** The credential is now "married" to that exact URL. If you ever accidentally visit a fake site (like `thummbnail-maker.com`), your device will check the RP ID, realize it doesn't match the marriage certificate, and **refuse to sign in.**
+
+> **In short:** Your device doesn't just know *who* you are; it knows exactly *where* it is allowed to talk to you.
+
+---
 
 ---
 
