@@ -69,7 +69,7 @@ sequenceDiagram
     AAD->>WD: scheduled API Call: GET Workday HR data changes
     WD-->>AAD: Response: Alice Smith status changed to 'Terminated'
 
-    rect rgb(255, 230, 230)
+    rect rgba(255, 50, 50, 0.15)
         Note right of AAD: (1) AAD disables Alice's corporate account identity.
         
         AAD->>TM_API: (2) SCIM PUSH (Backend-to-Backend Call):<br/>PATCH /Users/{id}<br/>Authorization: Bearer [Tenant_Specific_Token_1]<br/>Payload: { active: false }
@@ -91,6 +91,7 @@ sequenceDiagram
     end
 
 ```
+
 ### Explanation of the Diagram's Operational Flow:
 
 1. **HR Event:** An employee lifecycle event (like a termination, hire, or name change) occurs in Acme Corp's core system of record (e.g., Workday HR software).
