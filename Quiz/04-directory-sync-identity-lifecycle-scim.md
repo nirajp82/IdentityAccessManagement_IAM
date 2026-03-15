@@ -127,13 +127,15 @@ To be SCIM compliant, your API must implement specific routes with exact JSON sc
 
 ### Phase 3: The C# Implementation & Pre-Provisioning
 
-Let's look at the "Acme Corp" use case. Acme Corp signs an enterprise contract and needs to provision 500 graphic designers into highly restricted **Premium Batch-Rendering Workspaces** inside your Thumbnail Maker before they even log in.
+**The Scenario:** Acme Corp needs to securely pre-provision 500 designers into Premium Workspaces *before* their first login.
 
 Once connected, Acme Corp's Azure AD wakes up and fires 500 `POST /scim/v2/Users` requests directly to your SaaS API to create the dormant accounts.
 
 #### Why `PATCH` for Groups is so critical (and tricky)
 
-Once those 500 users exist, Acme Corp needs to assign them to the workspace. Instead of updating 500 individual users, Azure AD drops them into a `Premium_Designers` group and sends a `PATCH /Groups` request to your API.
+Once those 500 users exist, Acme Corp needs to assign them to the workspace. Instead of updating 500 individual user profiles...
+
+*** **Why this is better:** It uses "**The Scenario:**" formatting (which we used in Day 3) to make it highly scannable, and uses the exact technical term ("pre-provision") to explain *why* it happens before they log in.
 
 If Acme Corp hires a new designer and adds them to that group in Azure AD, your API receives this exact payload:
 
