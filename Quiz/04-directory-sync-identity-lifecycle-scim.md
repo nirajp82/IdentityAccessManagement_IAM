@@ -46,8 +46,6 @@ When Acme Corp purchases a license for your software, their internal IT Administ
 1. **Your SCIM Base URL:** A dedicated API endpoint route hosted on your servers (e.g., `https://api.thumbnailmaker.com/scim/v2`).
 2. **A Long-Lived Bearer Token:** A cryptographically secure API key that you generate specifically for Acme Corp. This token authenticates Acme Corp's Azure AD and ensures that the incoming data is written strictly into Acme Corp's secure database shard on your end, preventing any cross-tenant data leakage.
 
-
-
 Acme Corp's IT Admin takes this URL and Token, logs into *their* Azure AD portal, and establishes the persistent backend-to-backend pipeline.
 
 #### Automated Operational Flow (Lifecycle Events)
