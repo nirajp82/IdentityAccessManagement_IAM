@@ -1006,7 +1006,13 @@ The Policy Engine (OPA) performs a **Dual-Layer Check** before returning an `All
 To scale to millions of users, we split the system into two "Planes":
 
 * **The Control Plane (The Brain):** Where Admins write rules and manage users. High consistency, low throughput.
+    * High Consistency: When an Admin changes a security rule or deletes a user, the database ensures that change is 100% saved and "correct" before moving on. There is zero room for error, as a partially saved rule could create a security hole.
+    * Low Throughput: Since these administrative changes happen relatively rarely (e.g., a few times an hour or day), the system doesn't need to handle millions of actions per second. It can afford to take a few extra milliseconds to ensure the data is perfectly synchronized. 
+
 * **The Data Plane (The Muscle):** The fleet of sidecars evaluating requests. High throughput, eventual consistency.
+    * High Throughput: The Data Plane (the sidecars) must handle the "firehose" of traffic—potentially millions of authorization checks every second. It is designed to be incredibly fast, making decisions in less than 1 millisecond so it doesn't slow down the user.
+    * Eventual Consistency: Because there are thousands of sidecars spread across the globe, it is physically impossible to update all of them at the exact same microsecond. When an Admin changes a rule in the "Brain" (Control Plane), it might take a few milliseconds (or a second) for that change to ripple out to every "Muscle" (Sidecar). During that tiny window, a sidecar might still use the "old" rule.
+       
 * **Noisy Neighbor Mitigation:** We isolate heavy tenants using **Rate Limiting** and **Sharding** (moving high-traffic tenants to dedicated sidecars) so they don't consume the CPU/RAM of the shared fleet.
 
 ##### 3. Use Case: MSP Support Escalation (The "Assume Role" Pattern)
