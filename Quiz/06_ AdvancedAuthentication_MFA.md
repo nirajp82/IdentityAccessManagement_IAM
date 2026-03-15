@@ -22,16 +22,36 @@ For years, the industry relied on Time-based One-Time Passwords (TOTP), like the
 
 To understand an **Adversary-in-the-Middle (AiTM)** attack, stop thinking of it as a "fake website" that just steals a password. Think of it as a **"Man-in-the-Middle Proxy"** that sits between you and the real website, passing messages back and forth in real-time.
 
-#### The Step-by-Step "Shadow" Attack
+### The Step-by-Step "Shadow" Attack (Adversary-in-the-Middle)
 
-Imagine an engineer at Acme Corp wants to log into the **Thumbnail Maker**.
+Imagine an engineer at Acme Corp needs to log into the **Thumbnail Maker** application. Here is exactly how an AiTM reverse proxy attack silently steals their session.
 
-1. **The Bait:** The hacker sends an email: *"Urgent: Security Update for Thumbnail Maker."* The link goes to `thunbnail-maker.com` (note the extra 'n').
-2. **The Proxy:** The hacker isn't just hosting a static page. They are running a server that acts like a mirror. When the engineer opens that link, the hacker's server reaches out to the **REAL** `thumbnail-maker.com` and displays its login page to the user.
-3. **The Password Steal:** The engineer types their password. The hacker's server captures it and simultaneously types it into the real site.
-4. **The MFA Trap:** The real site asks for the 6-digit Google Authenticator code. The engineer sees this on the fake site, generates the code on their phone, and types it in.
-5. **The Hand-off:** The hacker’s server takes that 6-digit code and sends it to the real site **immediately** (before it expires).
-6. **The Victory:** The real site says, "Correct!" and sends back a **Session Cookie** (the master key that keeps you logged in). The hacker's proxy catches that cookie, keeps a copy for the hacker, and then hands it to the engineer so they don't suspect anything.
+**1. The Bait (The Setup)**
+The hacker sends a targeted phishing email: *"Urgent: Mandatory Security Update for Thumbnail Maker."* The link inside looks legitimate but actually points to `thunbnail-maker.com` (notice the subtle typo with the 'n').
+
+**2. The Proxy (The Real-Time Relay)**
+The hacker is not hosting a fake, static HTML webpage. Instead, their typo domain points to a **Reverse Proxy server**. When the engineer clicks the link, the proxy reaches out to the *real* `thumbnail-maker.com`, fetches the live login page, and instantly displays it to the engineer. The site looks and acts 100% authentic because it *is* the real code, just being piped through a malicious tunnel.
+
+**3. The Password Steal (The Interception)**
+The engineer types in their username and password and hits enter.
+
+* The credentials go straight to the **Hacker's Proxy**.
+* The proxy silently records the password in a text file.
+* In the exact same millisecond, the proxy forwards those credentials to the **Real Server**.
+
+**4. The MFA Trap (The Prompt)**
+The **Real Server** receives the correct password and says, *"Great! Now provide your 6-digit Google Authenticator code."* It sends this prompt back to the **Hacker's Proxy**, which immediately displays the prompt on the engineer's screen.
+
+**5. The Hand-off (The Bypass)**
+The engineer checks their phone, generates the 6-digit code, and types it into the website. The **Hacker’s Proxy** grabs this code and immediately forwards it to the **Real Server** before the 30-second timer expires.
+
+**6. The Victory (Session Theft)**
+Because the 6-digit code is valid, the **Real Server** says, *"Access Granted!"* and issues a **Session Cookie**—the digital master key that keeps the browser logged in.
+
+* The **Hacker's Proxy** intercepts this cookie and saves a copy for the hacker.
+* Finally, the proxy passes the cookie to the engineer's browser, successfully logging them into the real application.
+
+The engineer goes about their workday completely unaware that they were just compromised, while the hacker now possesses a fully authenticated session cookie that bypasses both the password and the MFA requirement entirely.
 
 ### The Verdict: TOTP vs. WebAuthn
 
