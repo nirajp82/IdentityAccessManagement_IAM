@@ -1318,6 +1318,53 @@ public async Task<bool> IsAuthorizedAsync(string userId, string action, string r
 **Q: How does ReBAC (Zanzibar) solve the "Nested Folder" problem better than SQL?**
 **A:** In SQL, checking access for a file inside 10 levels of folders requires a recursive "JOIN" or a "CTE" query, which is mathematically heavy and slow. ReBAC treats this as a **Graph Walk**. It follows the relationship "arrows" from the file to the parent to the user in sub-10ms, no matter how deep the folders are.
 
+#### The Scenario: The Deep Tree
+
+Imagine you have a file named **`Secret_Project.pdf`** located at the end of a long chain:
+`Global_Root` → `Marketing` → `2026_Campaigns` → `Internal_Only` → **`Secret_Project.pdf`**
+
+You want to know: *Can Alice view this file?*
+
+#### 1. The SQL Approach (The Recursive Join)
+
+In a standard SQL database, your table only knows the "immediate" parent. To find out if Alice (who has permissions at the `Global_Root`) can see the file, the database has to "climb the ladder" one step at a time using a **Recursive CTE (Common Table Expression)**.
+
+```sql
+WITH RECURSIVE AccessPath AS (
+    -- Start at the file
+    SELECT id, parent_id FROM Resources WHERE name = 'Secret_Project.pdf'
+    UNION ALL
+    -- Recursively "join" the table to itself to find the parent of the parent
+    SELECT r.id, r.parent_id FROM Resources r
+    JOIN AccessPath ap ON r.id = ap.parent_id
+)
+-- Finally, check if Alice has a 'viewer' role on any of those IDs
+SELECT * FROM Permissions WHERE resource_id IN (SELECT id FROM AccessPath) AND user_id = 'Alice';
+
+```
+
+**The Problem:** If that folder is 20 levels deep, SQL has to perform **20 separate Join operations** in memory. As your database grows to millions of files, this becomes incredibly slow and "heavy" on the CPU.
+
+
+#### 2. The ReBAC Approach (The Graph Walk)
+
+ReBAC (using a system like Zanzibar or SpiceDB) doesn't store data in rows; it stores it as **Tuples** (Relationship Arrows). It treats your permissions like a **Map**, not a spreadsheet.
+
+**The Logic:**
+Instead of calculating the path every time, the ReBAC engine "walks the graph." It looks at the file and asks: *"What are the paths to Alice?"*
+
+* **Tuple 1:** `file:Secret_Project.pdf#viewer@folder:Internal_Only`
+* **Tuple 2:** `folder:Internal_Only#parent@folder:2026_Campaigns`
+* **Tuple 3:** `folder:2026_Campaigns#parent@folder:Marketing`
+* **Tuple 4:** `folder:Marketing#parent@folder:Global_Root`
+* **Tuple 5:** `folder:Global_Root#viewer@user:Alice`
+
+**The Result:** The engine follows these arrows in a single, lightning-fast "walk." Because it uses a specialized **Graph Index**, it can jump from the file to Alice in **sub-10ms**, regardless of whether the folder is 5 levels deep or 500 levels deep.
+
+### Why this matters for the "Parent Folder":
+
+In SQL, you are constantly asking: *"Who is my parent? Okay, now who is THEIR parent?"* In ReBAC, you are asking: *"Is there a connection between this file and Alice?"* ReBAC is built for **Inheritance**. If you grant Alice access to the "Parent Folder," every child, sub-child, and file automatically "inherits" that connection through the graph arrows without the database ever needing to run a slow recursive query.
+
 **Q: What is the "Fail Closed" principle in the Hot Path?**
 **A:** It means that if your Policy Sidecar crashes or the Network fails, the .NET API (the PEP) must default to **DENY**. It is better for a user to be annoyed by a 403 error than for a hacker to gain access because the security "brain" was offline.
 
