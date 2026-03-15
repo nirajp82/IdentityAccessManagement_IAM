@@ -20,14 +20,15 @@ In the early days, if an enterprise bought your software for 500 employees, thei
 
 #### 2. Just-In-Time (JIT) Provisioning (The SSO Fallback)
 
-To fix manual uploads, the industry adopted JIT. When Alice is hired, she is added to her company's Azure AD. She clicks "Login" on your app, Azure AD sends a SAML/OIDC token, and your `.NET API` creates her database record *on the fly*.
+To fix the nightmare of manual CSV uploads, the industry adopted JIT. When Alice is hired, she is added to her company's Azure AD. The very first time she clicks "Login" on your app, Azure AD sends a secure SAML/OIDC token. Your `.NET API` says, *"I've never seen Alice before, but Azure AD vouches for her,"* and creates her database record on the fly.
 
 **The Breaking Point of JIT:**
-JIT is a "pull" mechanism. It only works when the user acts. It fails in Enterprise SaaS for two massive reasons:
+JIT is purely a "pull" mechanism—it only triggers when the user actively tries to log in. It completely fails in Enterprise SaaS for two massive reasons:
 
-1. **The Ghost User:** If an Admin wants to assign Alice to a specialized "GPU Workspace" today, but Alice hasn't logged in yet, the Admin can't find her in your system. She is a ghost.
-2. **The Deprovisioning Gap:** If Alice is fired on Friday, Azure AD deletes her. But your application *doesn't know that*. If Alice has a persistent 30-day session token or a hardcoded API key, she can continue downloading sensitive data until that session naturally expires.
-
+* **The Ghost User (Onboarding Failure):** If an Admin wants to assign Alice to a specialized "GPU Workspace" today, but Alice hasn't logged in yet, the Admin cannot find her in your system. Because her database record doesn't exist until her first login, she is a ghost, making pre-configuration impossible.
+* **The Deprovisioning Gap (The Manual Deletion Risk):** JIT only knows how to *create* users; it has no mechanism to *delete* them. If Alice is fired on Friday, she is removed from Azure AD. However, because a fired employee will never log in again to trigger a system update, your application remains completely blind to her termination.
+* **The Manual Burden:** Deactivating her account in your app becomes a manual step. The customer's IT Admin must remember to log into your specific dashboard and click "Deactivate."
+* **Zombie Accounts & Backdoors:** If the IT admin forgets, Alice becomes a "Zombie Account." Even though she can no longer use the SSO front door, your database still considers her an active employee. If she previously generated a permanent API key or has a 30-day session cookie saved on her personal phone, she can continue extracting sensitive data through the back door long after she was fired.
 ---
 
 ### Phase 2: The SCIM Architecture (System for Cross-domain Identity Management)
