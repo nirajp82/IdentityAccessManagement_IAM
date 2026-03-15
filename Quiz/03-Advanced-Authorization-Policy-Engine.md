@@ -1103,70 +1103,71 @@ Using the Audit Service from Phase 7, we capture exactly who Bob is impersonatin
 4. **No Backdoors:** "Assume Role" replaces hardcoded "Super Admin" passwords.
    
 ---
-
 ### Phase 9: Machine-to-Machine (The "Zero-Secret" Architecture)
 
-Humans make up less than 5% of traffic. the other 95% are **Workloads** (AI agents, K8s pods, Serverless functions). In a "Zero-Secret" architecture, we stop treating machines like people. Machines don't need passwords; they need **Attestation**.
+In a traditional setup, you’d give your .NET app a "Password" (Secret) stored in a `web.config` or an Environment Variable. In a **Zero-Secret** architecture, the machine uses its **Physical Identity** to prove who it is.
 
-#### 1. The Problem: Secret Sprawl
+#### 1. The Problem: Static Secrets
 
-Traditionally, developers generate a static `client_secret` (a password for a machine) and store it in an environment variable.
+When you hardcode a Stripe API key or a Database password into your Windows Server settings:
 
-* **The Risk:** These secrets are eventually leaked in logs, committed to GitHub, or stolen from memory.
-* **The Maintenance Nightmare:** Rotating a secret requires a production restart, which leads to teams keeping the same password for years.
+* **Leakage:** If a hacker gets into that server, they just type `set` in the command prompt and see all your passwords.
+* **Rotation:** Changing that password means remote-desktoping into 20 servers to update them.
 
-**The Solution:** Instead of passwords, we give workloads identities based on their **Provenance** (Where they are running and what they are doing).
+**The Solution:** Use **Workload Identity**. The server "proves" it is the legitimate "Billing Server" based on its hardware and location, not a password.
 
-#### 2. How we engineer the Zero-Secret Architecture
+#### 2. How we engineer the Zero-Secret Architecture (Windows/VM Style)
 
-We use three layers of defense to ensure a machine can only act if it can *prove* it is the legitimate workload.
+We use three layers of defense based on the **Infrastructure** (Azure, AWS, or Windows Server).
 
-**A. Attested Identity (SPIFFE/SPIRE)**
-When your .NET AI Agent boots up in a Kubernetes Pod, it doesn't have a password. Instead, it talks to a local "Node Agent" via a Unix socket.
+**A. Attested Identity (The Metadata Service)**
+When your .NET AI Agent boots up on a Windows VM, it doesn't have a password. Instead, it calls a special "Local Identity Service" that only exists on that specific hardware.
 
-1. The Node Agent interrogates the Linux kernel to verify the Process ID (PID) and the K8s Namespace.
-2. Once the machine "proves" who it is, it is issued a short-lived (e.g., 5-minute) SVID (a cryptographic certificate).
-3. The machine uses this to establish **mTLS (Mutual TLS)** for all internal communication.
+1. The .NET app asks the local machine: *"Who am I?"*
+2. The machine checks the local Windows **Security Identifier (SID)** or the Cloud Instance ID.
+3. It issues a short-lived (5-minute) **Identity Token** that is cryptographically signed by the Cloud Provider (Azure/AWS).
 
 **B. Token Exchange (Workload Federation)**
-Your AI Agent needs to call the external Stripe API, but Stripe doesn't understand your internal certificates.
+Your AI Agent needs to call Stripe, but Stripe doesn't know how to read Windows Identity tokens.
 
-1. The AI Agent sends its internal Kubernetes JWT to your **Security Token Service (STS)**.
-2. The STS validates the K8s signature and "exchanges" it for a scoped Stripe Access Token.
-3. This is **Federation**: You are using your internal trust to gain external access without ever hardcoding a long-lived key in your C# code.
+1. The .NET app sends its Windows Identity Token to your **Security Token Service (STS)**.
+2. The STS validates that this token actually came from your "Production Billing Server."
+3. The STS "exchanges" it for a 5-minute Stripe token.
 
-**C. The Sidecar Pattern (Envoy)**
-To keep your .NET code clean, your application shouldn't even know this is happening. An **Envoy Sidecar** sits next to your code. When your code tries to call `stripe.com`, Envoy intercepts the call, fetches the token from the STS, attaches the header, and sends it out.
+**C. Sidecar Pattern (Local Proxy)**
+To keep your C# code clean, you don't write the "Exchange" logic in your app. You run a tiny local proxy service. Your .NET code just calls `http://localhost:8080/stripe`. The proxy handles the identity check, fetches the token, and forwards the call.
 
-#### 3. Use Case: The AI Agent & The Stripe API
+#### 3. Use Case: The .NET Billing Service & The Stripe API
 
-**The Scenario:** A background AI Agent running in a Kubernetes Pod needs to call Stripe to charge a customer's credit card once a day.
+**The Scenario:** A .NET background service running on a Windows VM needs to call Stripe to charge a customer once a day.
 
 | Step | Action | Why it's Secure |
 | --- | --- | --- |
-| **1. Boot** | Pod starts with NO secrets. | No static keys to steal from the image. |
-| **2. Attest** | Local Agent verifies K8s Metadata. | Only a legitimate Pod can get an identity. |
-| **3. Exchange** | STS swaps K8s Identity for Stripe Token. | The "Stripe Secret" stays locked in a Vault. |
-| **4. Scoped** | STS limits token to Stripe's URL. | If stolen, the token can't be used on AWS/GitHub. |
-| **5. Network** | Token is bound to the Pod's IP. | A hacker cannot use the token from outside the cluster. |
+| **1. Boot** | Server starts with **ZERO** passwords in the config. | Nothing to steal from the hard drive or logs. |
+| **2. Attest** | App asks Windows/Cloud for a "Signed Identity." | Only the real, authorized server can get this ID. |
+| **3. Exchange** | STS swaps Windows ID for a Stripe Token. | The "Stripe Secret" is never sent to the VM. |
+| **4. Scoped** | STS limits the token strictly to `stripe.com`. | If stolen, it can't be used to access your DB. |
+| **5. Network** | Token is bound to the Server's IP address. | A hacker cannot use the token from their own laptop. |
 
-### 4. Implementation: The STS Token Exchange (C#)
+#### 4. Implementation: The STS Token Exchange (.NET C#)
 
-This is how your internal Token Service "swaps" a Kubernetes identity for an external API token.
+This is how your internal Token Service "swaps" a **VM/Cloud Identity** for an external API token. Notice we are checking the **Instance ID** (the server's fingerprint) instead of a K8s namespace.
 
 ```csharp
-public async Task<string> ExchangeK8sForStripeToken(string k8sIdentityToken)
+public async Task<string> ExchangeInstanceIdForStripeToken(string cloudIdentityToken)
 {
-    // 1. Validate the K8s Token (The Proof of Origin)
-    var principal = await _tokenValidator.ValidateK8sJwtAsync(k8sIdentityToken);
+    // 1. Validate the Token (Proof that this is actually our Server)
+    // We check the signature from Azure/AWS/Windows
+    var principal = await _tokenValidator.ValidateCloudIdentityAsync(cloudIdentityToken);
     
-    // 2. Verify this specific Pod is allowed to talk to Stripe
-    if (principal.Namespace != "ai-agents" || principal.ServiceAccount != "billing-bot")
+    // 2. Verify this specific Server is the "Billing-VM-01"
+    if (principal.InstanceId != "billing-vm-prod-001")
     {
-        throw new UnauthorizedAccessException("Workload attestation failed.");
+        throw new UnauthorizedAccessException("Hardware attestation failed. Identity mismatch.");
     }
 
-    // 3. Fetch the REAL Stripe Secret from a Hardware Security Module (HSM) or Vault
+    // 3. Fetch the REAL Stripe Secret from a secure Vault (Vault/KeyVault)
+    // The VM itself never sees this "Master Key"
     var stripeKey = await _vaultClient.GetSecretAsync("stripe-prod-key");
 
     // 4. Mint a "Downscoped" token that expires in 5 minutes
@@ -1177,13 +1178,12 @@ public async Task<string> ExchangeK8sForStripeToken(string k8sIdentityToken)
 
 ### 🗣️ Summary of the Zero-Secret Strategy
 
-1. **Identity is Local:** Machines get their identity from the infrastructure they run on (K8s/Kernel), not from a config file.
-2. **Short-Lived is Safe:** If a certificate or token is stolen, it becomes a "paperweight" in 5 minutes.
-3. **Audience Binding:** Tokens are minted for a specific "Audience" (e.g., only Stripe). A Stripe token cannot be used to log into your Database.
-4. **Blast Radius:** By binding tokens to IP addresses or specific CIDR blocks, you ensure that stolen credentials cannot be used "off-site."
+1. **Identity is Local:** Machines get their ID from the hardware/infrastructure (Windows SID or Cloud Instance ID), not from a file.
+2. **Short-Lived is Safe:** If a hacker manages to steal a token from memory, it becomes useless in 5 minutes.
+3. **Audience Binding:** Tokens only work for one target (e.g., Stripe). They are not "Master Keys."
+4. **Blast Radius:** By binding tokens to the server's IP address, you ensure stolen credentials cannot be used from a different location.
 
 ---
-
 
 ### Phase 10: Audit Logging
 
