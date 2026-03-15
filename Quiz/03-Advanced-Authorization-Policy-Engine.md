@@ -1143,13 +1143,15 @@ To keep your C# code clean, an **Envoy Sidecar** sits next to your code. When yo
 
 **The Scenario:** A .NET background service running on a Windows VM needs to call Stripe to charge a customer once a day.
 
+
 | Step | Action | Why it's Secure |
-|  |  |  |
+| --- | --- | --- |
 | **1. Boot** | Server starts with **ZERO** passwords in the config. | Nothing to steal from the hard drive or logs. |
 | **2. Attest** | SPIRE Agent verifies Windows SID/Instance ID. | Only the real, authorized server can get an identity. |
 | **3. Exchange** | STS swaps **SPIFFE SVID** for a Stripe Token. | The "Stripe Secret" is never sent to the VM. |
 | **4. Scoped** | STS limits the token strictly to `stripe.com`. | If stolen, it can't be used to access your DB. |
 | **5. Network** | Token is bound to the Server's IP address. | A hacker cannot use the token from their own laptop. |
+
 
 #### 4. Implementation: The STS Token Exchange (.NET C#)
 
