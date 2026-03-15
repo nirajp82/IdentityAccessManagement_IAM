@@ -104,8 +104,6 @@ The hacker’s server is left waiting for a signature that never comes. They hav
 
 > **A:** Yes. "Passkeys" is the consumer-friendly name for this technology. Whether you use a YubiKey, an iPhone (FaceID), or an Android phone (Fingerprint), the underlying **WebAuthn** protocol works exactly the same way to prevent phishing.
 
----
-
 ### 📝 Summary of Defense
 
 | Feature | 6-Digit Code (TOTP) | Hardware Key (WebAuthn) |
@@ -115,6 +113,110 @@ The hacker’s server is left waiting for a signature that never comes. They hav
 | **Relay Protection?** | **None.** | **Signature Nonce.** (Cannot be replayed). |
 
 
+In a standard password login, the server compares two strings: the password you sent and the hashed password in the database. In **WebAuthn**, the server doesn't "compare" strings; it performs **Math Verification**.
+
+The server sends a "Challenge," the hardware key signs it using its **Private Key**, and the C# code below uses the **Public Key** (which you stored during registration) to verify that signature.
+
+### 1. The Data Structure
+
+Before the code, you need a library. In the .NET ecosystem, the gold standard is **Fido2-NetLib**. You store the user's "Public Key" in your database like this:
+
+```csharp
+public class StoredCredential
+{
+    public byte[] DescriptorId { get; set; } // The ID of the hardware key
+    public byte[] PublicKey { get; set; }    // The Public Key used for math verification
+    public uint SignatureCounter { get; set; } // Prevents "Cloning" attacks
+    public Guid UserId { get; set; }
+}
+
+```
+
+### 2. Step 1: Generating the Challenge (The "Nugget")
+
+The backend must first issue a "Challenge." This is a random string that the hardware key must sign to prove the user is physically present.
+
+```csharp
+[HttpPost("assertion-options")]
+public AssertionOptions GetAssertionOptions([FromBody] string username)
+{
+    var user = _userRepo.GetByUsername(username);
+    var existingCredentials = _db.Credentials.Where(c => c.UserId == user.Id).ToList();
+
+    // 1. Create the options for the browser
+    var options = _fido2.GetAssertionOptions(
+        existingCredentials.Select(c => new PublicKeyCredentialDescriptor(c.DescriptorId)).ToList(),
+        UserVerificationRequirement.Discouraged // Can require PIN or Biometrics here
+    );
+
+    // 2. IMPORTANT: Save the challenge in a temporary cache (like Redis) 
+    // to verify it when the user returns
+    _cache.Set($"challenge-{username}", options.Challenge);
+
+    return options;
+}
+
+```
+
+### 3. Step 2: Verifying the Hardware Signature (The "Defense")
+
+This is where the **AiTM Phishing protection** happens. The hardware key sends back a "Signed Assertion." The C# code verifies the math and, crucially, the **Origin**.
+
+```csharp
+[HttpPost("verify-assertion")]
+public async Task<IActionResult> VerifyAssertion([FromBody] AuthenticatorAssertionRawResponse clientResponse)
+{
+    // 1. Retrieve the challenge we sent 10 seconds ago
+    var cachedChallenge = _cache.Get($"challenge-{clientResponse.Username}");
+
+    // 2. Fetch the Public Key we have on file for this specific YubiKey
+    var credential = _db.Credentials.First(c => c.DescriptorId == clientResponse.Id);
+
+    // 3. The Library Verification
+    // This is where the mathematical magic happens
+    var res = await _fido2.MakeAssertionAsync(clientResponse, cachedChallenge, credential.PublicKey, credential.SignatureCounter, async (args, token) => {
+        return true; // You can do extra checks here
+    });
+
+    // 4. THE CRITICAL SECURITY CHECK
+    // The library internally checks if clientResponse.Response.ClientDataJson.Origin 
+    // matches your registered domain (e.g., https://thumbnail-maker.com).
+    // If it says "thunbnail-maker.com", this method throws an exception.
+    if (res.Status == "ok")
+    {
+        // Update the counter to prevent "Replay" or "Clone" attacks
+        credential.SignatureCounter = res.Counter;
+        await _db.SaveChangesAsync();
+
+        // Access Granted! Issue the JWT.
+        return Ok(GenerateJwt(res.User));
+    }
+
+    return BadRequest("Hardware verification failed.");
+}
+
+```
+
+### Why this C# code is un-phishable:
+
+1. **Origin Check (The "No-Proxy" Rule):** Inside that `MakeAssertionAsync` call, the library decodes a piece of data called `clientDataJSON`. This contains the **Origin** (the URL) reported by the browser. If the browser tells the hardware key it is at `thunbnail-maker.com`, the signature created will be mathematically linked to that wrong URL. When the library compares that signature against your expected URL (`thumbnail-maker.com`), the math fails.
+2. **Challenge/Nonce (The "No-Replay" Rule):** Because the `cachedChallenge` is unique for every single login, a hacker cannot record a successful login today and "replay" it tomorrow. The old signature won't match the new challenge.
+3. **Signature Counter (The "No-Clone" Rule):** The hardware key increments a counter every time it is used. If the server sees a counter value lower than or equal to the last one stored, it knows someone has cloned the credential or is re-running a captured session.
+
+
+### 🏛️ Whiteboard FAQ: Implementing Advanced MFA
+
+**Q: Do I have to write the cryptographic math (SHA-256, Elliptic Curve) myself?**
+
+> **A:** Absolutely not. Never write your own crypto. Use a certified library like `Fido2-NetLib`. Your job as the architect is to ensure the **Origin** is correctly configured in the library settings and that the **Challenge** is stored securely between requests.
+
+**Q: What if the user loses their YubiKey?**
+
+> **A:** This is the biggest operational hurdle. You must have a "Recovery Path." Usually, this involves a set of one-time "Recovery Codes" generated during registration, or requiring the user to verify their identity via a secondary manual process (like a video call with IT) to register a new key.
+
+**Q: Does this work on mobile?**
+
+> **A:** Yes! Modern iPhones and Androids use the exact same WebAuthn protocol. Instead of tapping a USB key, the user just uses **FaceID** or **Fingerprint**. The "Private Key" is stored in the phone's Secure Enclave.
 
 ---
 
