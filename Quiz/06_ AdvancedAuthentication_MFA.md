@@ -68,61 +68,178 @@ The engineer goes about their workday completely unaware that they were just com
 
 ---
 
-## Phase 2: The First Line of Defense — Stopping the Bots
+### 2. The Lifecycle & The Attack: From Setup to Login
 
-Before we even worry about advanced cryptography, we must protect the `/login` endpoint from being hammered by credential stuffing botnets.
+To understand how the hacker is defeated, we have to look at the two distinct lifecycles of WebAuthn: **Registration (Setup)** and **Authentication (Login)**. In *both* phases, the server generates a unique cryptographic "Challenge" to ensure the request is fresh and cannot be replayed by an attacker.
 
-In modern .NET, we don't build custom rate limiters in the controller. We use the built-in `Microsoft.AspNetCore.RateLimiting` middleware to drop malicious traffic at the Kestrel web server level, before the application even attempts to query the database.
+**Phase A: The Setup (Registration)**
+When the engineer first sets up their YubiKey, the server sends a *Registration Challenge*. The YubiKey generates a brand new Private/Public key pair, signs the challenge, and permanently binds itself to the real domain (`thumbnail-maker.com`). The Public Key is sent to the database.
 
-### The .NET Implementation: Fixed Window Rate Limiting
+**Phase B: The Login & The Imposter at the Gate**
+When the user returns to log in, the server generates an *Authentication Challenge*. Let's look at how this stops the hacker's Shadow Proxy (AiTM) attack in real-time:
 
-Here is how we implement a strict **Fixed Window Rate Limiter** that locks down the login endpoint by IP address.
+* **The Redirect & Challenge:** The hacker tricks you into visiting `thunbnail-maker.com` (the typo domain). The proxy server grabs the login "Challenge" (the random string) from the real site and passes it to your browser.
+* **The Browser's Honesty:** Your browser sees you are at `thunbnail-maker.com` and asks your hardware key for a signature for *that specific domain*.
+* **The Origin Mismatch:** Your hardware key compares the browser's request (`thunbnail-maker.com`) against its internal memory (`thumbnail-maker.com`, which it saved during Setup). Because the domains are not an exact match, it **refuses to sign the challenge**.
+* **The Hacker is Powerless:** Without that hardware-signed cryptographic proof, the real API will never issue a session cookie. The hacker is left waiting for a signature that never comes.
 
-```csharp
-using Microsoft.AspNetCore.RateLimiting;
-using System.Threading.RateLimiting;
+---
 
-var builder = WebApplication.CreateBuilder(args);
+### 2. The Lifecycle & The Attack: From Setup to Login
 
-// 1. Define the Rate Limiting Policy
-builder.Services.AddRateLimiter(options =>
-{
-    // Apply this specific policy to the Login endpoint
-    options.AddPolicy("StrictLoginPolicy", context =>
-    {
-        // Get the client's IP Address
-        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+To understand how the hacker is defeated, we have to look at the two distinct lifecycles of WebAuthn: **Registration (Setup)** and **Authentication (Login)**. In *both* phases, the server generates a unique cryptographic "Challenge" to ensure the request is fresh and cannot be replayed by an attacker.
 
-        return RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: remoteIp,
-            factory: partition => new FixedWindowRateLimiterOptions
-            {
-                AutoReplenishment = true,
-                PermitLimit = 5, // Maximum 5 attempts
-                Window = TimeSpan.FromMinutes(15), // Per 15-minute window
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0 // Drop requests immediately if over limit
-            });
-    });
+**Phase A: The Setup (Registration)**
+When the engineer first sets up their YubiKey, the server sends a *Registration Challenge*. The YubiKey generates a brand new Private/Public key pair, signs the challenge, and permanently binds itself to the real domain (`thumbnail-maker.com`). The Public Key is sent to the database.
 
-    // Return a 429 Too Many Requests when the limit is hit
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-});
+**Phase B: The Login & The Imposter at the Gate**
+When the user returns to log in, the server generates an *Authentication Challenge*. Let's look at how this stops the hacker's Shadow Proxy (AiTM) attack in real-time.
 
-var app = builder.Build();
-app.UseRateLimiter(); // Enable the middleware
+#### The AiTM Phishing Sequence
 
-// 2. Apply the policy to the specific endpoint
-app.MapPost("/api/auth/login", async (LoginDto request) => {
-    // Authentication logic here
-    return Results.Ok(new { Token = "jwt_here" });
-}).RequireRateLimiting("StrictLoginPolicy");
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Yubi as Hardware Key
+    participant Browser as Engineer's Browser
+    participant Proxy as Hacker's Proxy (thunbnail-maker)
+    participant API as Real Server (thumbnail-maker)
 
-app.Run();
+    Browser->>Proxy: Visits https://thunbnail-maker.com
+    Proxy->>API: Fetches login page
+    API-->>Proxy: Returns WebAuthn Challenge & RP ID ("thumbnail-maker.com")
+    Proxy-->>Browser: Relays Challenge & RP ID to victim
+
+    Note over Browser, Yubi: The Browser is honest. It tells the YubiKey exactly where it is based on the URL bar.
+    Browser->>Yubi: Request Signature for Origin: "thunbnail-maker.com"
+
+    rect rgba(255, 50, 50, 0.15)
+        Note over Yubi: THE CRYPTOGRAPHIC BLOCK
+        Yubi->>Yubi: Compares browser's Origin against its registered memory.
+        Yubi-->>Browser: ❌ ERROR: Origin Mismatch! Refusing to sign.
+    end
+
+    Note over Proxy, API: The Hacker is powerless. They cannot forge the hardware signature.
+    Browser-->>Proxy: (Attack stopped. No signature provided.)
+    Proxy-->>API: (Authentication Fails)
 
 ```
 
-**Architectural Benefit:** If a botnet tries 1,000 passwords from a single IP, the first 5 hit your database. The remaining 995 are instantly rejected by the web server with a `429 Too Many Requests` with almost zero CPU overhead.
+* **The Redirect & Challenge:** The hacker tricks you into visiting `thunbnail-maker.com` (the typo domain). The proxy server grabs the login "Challenge" (the random string) from the real site and passes it to your browser.
+* **The Browser's Honesty:** Your browser sees you are at `thunbnail-maker.com` and asks your hardware key for a signature for *that specific domain*.
+* **The Origin Mismatch:** Your hardware key compares the browser's request (`thunbnail-maker.com`) against its internal memory (`thumbnail-maker.com`, which it saved during Setup). Because the domains are not an exact match, it **refuses to sign the challenge**.
+* **The Hacker is Powerless:** Without that hardware-signed cryptographic proof, the real API will never issue a session cookie. The hacker is left waiting for a signature that never comes.
+
+---
+
+### 3. The .NET Implementation: Math Verification
+
+In WebAuthn, the server doesn't compare password strings; it performs **Math Verification**. The code below uses `Fido2-NetLib` to manage the challenges for both the Setup and Login phases.
+
+**The Data Structure:**
+
+```csharp
+public class StoredCredential{
+    public byte[] DescriptorId { get; set; } // The ID of the hardware key
+    public byte[] PublicKey { get; set; }    // The Public Key used for math verification
+    public uint SignatureCounter { get; set; } // Prevents "Cloning" attacks
+    public Guid UserId { get; set; }
+}
+
+```
+
+#### Step 1: The Setup (Generating the Registration Challenge)
+
+*When the user first registers their key, the server generates the initial challenge to bind the device to the domain.*
+
+```csharp
+[HttpPost("make-credential-options")]
+public CredentialCreateOptions MakeCredentialOptions([FromBody] string username)
+{
+    var user = _userRepo.GetByUsername(username);
+
+    // 1. Create the registration challenge
+    var options = _fido2.RequestNewCredential(
+        new Fido2User { Name = user.Username, Id = user.Id.ToByteArray() },
+        new List<PublicKeyCredentialDescriptor>(),
+        AuthenticatorSelection.Default,
+        AttestationConveyancePreference.None
+    );
+
+    // 2. Temporarily store the challenge to verify the registration response
+    _cache.Set($"reg-challenge-{username}", options.Challenge);
+
+    return options;
+}
+
+```
+
+#### Step 2: The Login (Generating the Authentication Challenge - The "Nugget")
+
+*When the user returns to log in, the server issues a fresh challenge to prove they are physically present today.*
+
+```csharp
+[HttpPost("assertion-options")]
+public AssertionOptions GetAssertionOptions([FromBody] string username){
+    var user = _userRepo.GetByUsername(username);
+    var existingCredentials = _db.Credentials.Where(c => c.UserId == user.Id).ToList();
+
+    // 1. Create the options for the browser
+    var options = _fido2.GetAssertionOptions(
+        existingCredentials.Select(c => new PublicKeyCredentialDescriptor(c.DescriptorId)).ToList(),
+        UserVerificationRequirement.Discouraged // Can require PIN or Biometrics here
+    );
+
+    // 2. IMPORTANT: Save the challenge in a temporary cache (like Redis) 
+    // to verify it when the user returns
+    _cache.Set($"challenge-{username}", options.Challenge);
+
+    return options;
+}
+
+```
+
+#### Step 3: Verifying the Hardware Signature (The "Defense")
+
+*This is the mathematical defense. If the AiTM proxy altered the domain, this code throws an exception and stops the attack.*
+
+```csharp
+[HttpPost("verify-assertion")]
+public async Task<IActionResult> VerifyAssertion([FromBody] AuthenticatorAssertionRawResponse clientResponse){
+    // 1. Retrieve the challenge we sent 10 seconds ago
+    var cachedChallenge = _cache.Get($"challenge-{clientResponse.Username}");
+
+    // 2. Fetch the Public Key we have on file for this specific YubiKey
+    var credential = _db.Credentials.First(c => c.DescriptorId == clientResponse.Id);
+
+    // 3. The Library Verification (Mathematical magic)
+    var res = await _fido2.MakeAssertionAsync(clientResponse, cachedChallenge, credential.PublicKey, credential.SignatureCounter, async (args, token) => {
+        return true; // You can do extra checks here
+    });
+
+    // 4. THE CRITICAL SECURITY CHECK
+    // The library internally checks if clientResponse.Response.ClientDataJson.Origin 
+    // matches your registered domain. If it says "thunbnail-maker.com", it throws an exception.
+    if (res.Status == "ok")
+    {
+        // Update the counter to prevent "Replay" or "Clone" attacks
+        credential.SignatureCounter = res.Counter;
+        await _db.SaveChangesAsync();
+
+        // Access Granted! Issue the JWT.
+        return Ok(GenerateJwt(res.User));
+    }
+
+    return BadRequest("Hardware verification failed.");
+}
+
+```
+
+**Why this C# code is un-phishable:**
+
+* **Origin Check (No-Proxy):** The library checks the `ClientDataJson.Origin`. If the signature is linked to the wrong URL, the math fails.
+* **Challenge/Nonce (No-Replay):** The challenge is unique for every login; old signatures cannot be re-used.
+* **Signature Counter (No-Clone):** The server checks the hardware key's incrementing counter to detect cloned credentials.
 
 ---
 
