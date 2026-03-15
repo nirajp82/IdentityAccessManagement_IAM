@@ -347,89 +347,79 @@ sequenceDiagram
 If Alice did not have the `writer` relationship to the `Generated_Thumbnail_eu` folder, the second SpiceDB check would fail instantly. OPA would return `{"allow": false}`, and the .NET API would block the request before a single byte of image data was ever processed or moved across regions. This guarantees strict data residency and access control using sub-millisecond graph lookups.
 
 ---
-
-#### 🛠️ Deep Dive: How Zanzibar Actually Works (The Code)
+# 🏛️ Phase 5: Deep Dive into the Zanzibar (ReBAC) Model
 
 To make Zanzibar work in your architecture, you don't build SQL tables. You write a **Schema** defining the relationships, and you use an SDK to write **Tuples**.
 
-**1. The Zanzibar Schema (Stored in SpiceDB)**
-Just like defining a SQL schema, your security team defines the relationships that are mathematically possible in your system.
+### 1️⃣ Understanding the "Definition" (The Container)
 
-```text
-definition user {}
+In Zanzibar, a **`definition`** acts as a secure container. Think of it as the **Blueprint** or the **Rules of the World** for a specific object type.
 
-definition folder {
-    relation admin: user
-    relation writer: user
-    relation viewer: user
-    
-    # Zanzibar can dynamically compute permissions!
-    # If you are an admin, you automatically inherit writer permissions.
-    permission write = writer + admin
-}
+* You are not saying *who* is in a folder yet.
+* You are defining what it means to be **assigned a role** within a folder.
 
-```
+If a user is not linked to that container through one of the defined relations (**Roles**), they are invisible to it. They have **zero access** by default.
 
-######### 1. Understanding the "Definition" (The Container)
-
-In Zanzibar, a **`definition`** acts as a secure container. Think of it as the **Blueprint** or the **Rules of the World** for a specific object type. You aren't saying *who* is in a specific folder yet; you are defining *what it means* to be "in" a folder.
-
-If a user is not linked to that container through one of the defined relations (roles), they are invisible to it. They have **zero access by default**.
-
-######### 2. Side-by-Side: SQL vs. Zanzibar
+### 2️⃣ Side-by-Side: SQL vs. Zanzibar
 
 To understand Zanzibar, compare it to the traditional Relational (SQL) approach:
 
 | Concept | SQL (Table-Centric) | Zanzibar (Relationship-Centric) |
-|  |  |  |
+| --- | --- | --- |
 | **The Container** | **Table:** `folder_permissions` | **Definition:** `definition folder {}` |
 | **The Connection** | **Column/Row:** `role_name` (data) | **Relation:** `relation admin: user` (link) |
 | **The Rule** | **Hardcoded in Code:** `if (role == 'admin'...)` | **Permission:** `permission write = writer + admin` |
 
-######### 3. The Zanzibar Schema (The Logic)
+---
 
-The schema defines the "badges" people wear (**Relations**) and the "powers" those badges grant (**Permissions**).
+### 3️⃣ The Zanzibar Schema (The Logic)
+
+The schema defines the **Roles** users can hold and the **Permissions** those roles grant.
 
 ```text
 definition user {}
 
 definition folder {
     ### 1. THE RELATIONS (Who is connected?)
-    ### These are like categories or badges.
+    ### These define the specific ROLES a user can hold.
     relation admin: user
     relation writer: user
     relation viewer: user
     relation service_account: user ### For the .NET Thumbnail Maker
-    
+
     ### 2. THE PERMISSIONS (What can they do?)
     ### The "+" sign means "Union" (OR). This is the 'Math' of the system.
-    
-    ### To write, you must be a writer OR an admin
+
+    ### To write, you must hold the 'writer' role OR the 'admin' role
     permission write = writer + admin
-    
-    ### To view, you can be a viewer OR a writer OR an admin OR the background service
+
+    ### To view, you can hold 'viewer', 'writer', 'admin', OR be the 'service_account'
     permission view = viewer + writer + admin + service_account
 }
 
 ```
 
-######### 4. The Anatomy of a Zanzibar "Row" (The Tuple)
+---
 
-Data doesn't live in columns; it lives in **Relationship Tuples**. A Tuple is a simple string that creates a directed arrow from an object to a subject.
+### 4️⃣ The Anatomy of a Zanzibar "Row" (The Tuple)
 
-**Format:** `object_type:object_id###relation@subject_type:subject_id`
+Data does not live in columns; it lives in **Relationship Tuples**. A Tuple is a simple string that creates a directed arrow from an object to a subject.
+
+**Format:** `object_type:object_id#relation@subject_type:subject_id`
 
 | SQL Table Row (Conceptual) | Zanzibar Tuple (Actual Data) | Meaning |
-|  |  |  |
-| `Folder_A`, `Alice`, `Admin` | `folder:alpha###admin@user:alice` | Alice is an Admin of Alpha |
-| `Folder_A`, `Maker_App`, `Service` | `folder:alpha###service_account@user:svc_maker` | .NET App is the Service Account |
-| `Folder_B`, `Bob`, `Viewer` | `folder:beta###viewer@user:bob` | Bob is only a Viewer of Beta |
+| --- | --- | --- |
+| `Folder_A`, `Alice`, `Admin` | `folder:alpha#admin@user:alice` | Alice holds the **Admin role** for Alpha |
+| `Folder_A`, `Maker_App`, `Service` | `folder:alpha#service_account@user:svc_maker` | .NET App holds the **Service role** |
+| `Folder_B`, `Bob`, `Viewer` | `folder:beta#viewer@user:bob` | Bob holds the **Viewer role** for Beta |
 
-######### 5. ⚡ Why Zanzibar Wins: The "Inheritance" Power
+---
 
-In **SQL**, the database is "dumb." Your **C### code** must be "smart" enough to know that an Admin is allowed to view things. This leads to **Spaghetti Code**.
+### ⚡ 5️⃣ Why Zanzibar Wins: The Inheritance Power
 
-**SQL Logic (Manual & Error Prone):**
+In SQL, the database is "dumb." Your C# code must be "smart" enough to know that an Admin is allowed to view things. This often leads to **Spaghetti Code**.
+
+**SQL Logic (Manual & Error Prone)**
 
 ```csharp
 // You have to manually write the "OR" logic in every single API endpoint
@@ -439,21 +429,23 @@ if (userRole == "admin" || userRole == "writer" || userRole == "viewer") {
 
 ```
 
-**Zanzibar Logic (Automatic & Centralized):**
-The logic is baked into the **Definition**. When the .NET API asks: *"Can Alice view folder:alpha?"*, Zanzibar scans the tuples and calculates the result instantly.
+**Zanzibar Logic (Automatic & Centralized)**
+The logic is baked directly into the **Definition**. When the .NET API asks: *"Can Alice view folder:alpha?"*, Zanzibar scans the tuples and calculates the result instantly based on role inheritance.
 
-| User | Tuple Badge | `permission view` (v + w + a) | `permission write` (w + a) |
-|  |  |  |  |
+| User | Tuple Role | `permission view` (v + w + a) | `permission write` (w + a) |
+| --- | --- | --- | --- |
 | **Charlie** | `viewer` | **YES** | **NO** |
 | **Alice** | `writer` | **YES** | **YES** |
 | **Bob** | **`admin`** | **YES** | **YES** |
 
-######### 6. C### Example: How to "Insert" a Row (Writing a Tuple)
+---
 
-In SQL, you use `INSERT INTO`. In Zanzibar (SpiceDB), you use `WriteRelationships`. This adds the "arrow" to the graph.
+### 6️⃣ C# Example: How to Insert a Row (Write a Tuple)
+
+In SQL, you use `INSERT INTO`. In Zanzibar (SpiceDB), you use `WriteRelationships`. This adds the relationship arrow to the graph.
 
 ```csharp
-// Adding "Alice" as a "Writer" to "Folder Alpha"
+// Adding "Alice" to the "Writer" ROLE for "Folder Alpha"
 var update = new RelationshipUpdate
 {
     Operation = RelationshipUpdate.Types.Operation.Create,
@@ -462,7 +454,7 @@ var update = new RelationshipUpdate
         // THE OBJECT (The Container)
         Resource = new ObjectReference { ObjectType = "folder", ObjectId = "alpha" },
         
-        // THE RELATION (The Badge)
+        // THE RELATION (The Role)
         Relation = "writer",
         
         // THE SUBJECT (The User)
@@ -476,27 +468,22 @@ await _spiceDbClient.WriteRelationshipsAsync(new WriteRelationshipsRequest { Upd
 
 ```
 
-######### 7. How the "Permission" Logic Queries the Rows
+---
 
-This is the most critical part: **Permissions are dynamic queries.**
+### 7️⃣ How the Permission Logic Queries the Rows
 
-When you define `permission write = writer + admin`, and Alice tries to upload a file, Zanzibar performs a lightning-fast parallel search:
+Permissions are **dynamic queries**. When you define `permission write = writer + admin`, and Alice tries to upload a file, Zanzibar performs a lightning-fast parallel search:
 
-1. Does the tuple `folder:alpha###writer@user:alice` exist? **(Result: NO)**
-2. Does the tuple `folder:alpha###admin@user:alice` exist? **(Result: YES)**
+1. **Does the tuple exist?** `folder:alpha#writer@user:alice` → **NO**
+2. **Does the tuple exist?** `folder:alpha#admin@user:alice` → **YES**
 
-Since it found the **Admin** connection, and your definition says `writer OR admin`, it returns **TRUE**. If a user like "Hacker Dave" has no tuples connecting him to the folder, he is mathematically invisible and denied instantly.
+Because your definition says `writer OR admin`, Zanzibar returns **TRUE**. If a user like "Hacker Dave" has no tuples connecting him to the folder, he is mathematically invisible and denied instantly.
 
+---
 
-######### 🗣️ Summary for the Whiteboard
+### 8️⃣ The .NET Implementation: Access Elevation
 
-* **The Definition:** The Blueprint. It defines what roles exist and what powers they have.
-* **The Tuple:** The Data. It is the "row" that connects a specific person to a specific folder.
-* **The Permission:** The Logic. It is the "math" that scans the Tuples to see if a user has the right badge for the job.
-**2. The .NET Implementation: Writing the Tuple**
-Remember Step 1 of our scenario where we "temporarily elevated" Alice to a Folder Admin? We didn't update a SQL database. A specialized .NET Identity microservice simply pushed a Tuple into SpiceDB using gRPC.
-
-Here is the exact C# code using the official `Authzed` (SpiceDB) NuGet package:
+When we "temporarily elevated" Alice to a Folder Admin in our scenario, we did not update a SQL database. Instead, a specialized .NET Identity microservice pushed a Tuple into SpiceDB using gRPC.
 
 ```csharp
 using Authzed.Api.V1;
@@ -515,7 +502,7 @@ public class AccessElevationService
 
     public async Task ElevateToAdminAsync(string userId, string folderId)
     {
-        // 2. We are writing the Relationship Tuple: folder:{folderId}#admin@user:{userId}
+        // 2. Writing the Relationship Tuple: folder:{folderId}#admin@user:{userId}
         var request = new WriteRelationshipsRequest
         {
             Updates =
@@ -525,28 +512,34 @@ public class AccessElevationService
                     Operation = RelationshipUpdate.Types.Operation.Create,
                     Relationship = new Relationship
                     {
-                        // The Resource (Object)
                         Resource = new ObjectReference { ObjectType = "folder", ObjectId = folderId },
-                        // The Action (Relation)
-                        Relation = "admin",
-                        // The Subject (User)
-                        Subject = new SubjectReference { 
-                            Object = new ObjectReference { ObjectType = "user", ObjectId = userId } 
+                        Relation = "admin", // Assigning the Admin Role
+                        Subject = new SubjectReference {
+                            Object = new ObjectReference { ObjectType = "user", ObjectId = userId }
                         }
                     }
                 }
             }
         };
 
-        // 3. Write to the Graph DB instantly
         await _spiceDbClient.WriteRelationshipsAsync(request);
-        Console.WriteLine($"Successfully elevated {userId} to admin on folder {folderId}");
+        Console.WriteLine($"Successfully elevated {userId} to admin role on folder {folderId}");
     }
 }
 
 ```
 
-**The Beauty of the Graph:** Because we executed that C# code, the relationship now mathematically exists in the graph. The next time the .NET API asks OPA, *"Can Alice save to this folder?"*, OPA executes a blazing-fast gRPC `CheckPermission` call against SpiceDB. SpiceDB sees the tuple we just inserted and returns `true` in 2 milliseconds.
+### 🗣️ Summary for the Whiteboard
+
+* **The Definition:** The Blueprint. Defines what **Roles** exist and what powers they have.
+* **The Tuple:** The Data. The "row" that connects a specific person to a specific folder via a **Role**.
+* **The Permission:** The Logic. The "math" that scans tuples to determine if a user holds a **Role** authorized for the action.
+
+---
+
+### 🌐 The Beauty of the Graph
+
+Because the relationship now mathematically exists in the graph, the next time the .NET API asks: *"Can Alice save to this folder?"*, it performs a blazing-fast gRPC `CheckPermission` call. SpiceDB finds the role-based tuple and returns **true** in approximately **2 milliseconds**.
 
 ---
 
