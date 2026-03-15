@@ -474,21 +474,34 @@ By building this two-way safety net, it doesn't matter if Bob logs in before the
 
 ---
 
+Here is the cheat sheet reorganized into a clear, logical narrative flow.
+
+Instead of a random list of terms, I have structured it as **The Problem**, **The Standard**, **The Operations**, and **The Engineering Edge Cases**. This makes it much easier to digest and reference.
+
+---
+
 ### 📝 Day 4 Cheat Sheet: Directory Sync & SCIM
 
-* **JIT Provisioning:** Creates users on the fly during SSO login. Great for simple onboarding, but terrible for advanced pre-configuration.
-* **The Ghost User Problem:** JIT cannot assign resources (like Premium Workspaces) to a user who hasn't logged in yet because they don't exist in your database.
-* **The Deprovisioning Gap:** JIT cannot revoke active sessions when an employee is fired because it relies on the user initiating a login.
-* **SCIM (RFC 7644):** An open REST API standard that allows Identity Providers (Azure AD/Okta) to **push** changes to your app in real-time.
-* **Pre-Provisioning (`POST /Users`):** Creates the user profile instantly, allowing admins to map them to projects before Day 1.
-* **The Kill Switch (`PATCH /Users`):** Replaces `active: true` with `active: false`. Your system must react by terminating live sessions (e.g., via Redis Pub/Sub).
-* **Group Sync (`POST /Groups`):** Syncs massive internal security groups directly to your SaaS application's internal ReBAC/PBAC roles.
-* **The `externalId`:** The immutable anchor that ties your database record to the customer's Azure AD record. Never rely solely on email addresses.
-* **The Race Condition:** Always implement "Upsert" logic. If SSO beats SCIM, create the user. When SCIM arrives later, map the `externalId` to the existing user.
-* **Idempotency:** SCIM endpoints will often receive duplicate requests. Your controllers must handle duplicates gracefully without crashing or creating duplicate database rows.
+#### 1. The Problem with JIT Provisioning
+
+* **JIT (Just-In-Time) Provisioning:** Creates users "on the fly" the first time they log in via SSO. It is great for simple apps but breaks down in enterprise environments.
+* **The Ghost User Problem (Onboarding Failure):** JIT cannot pre-assign resources (like Premium Workspaces) to a new hire before Day 1, because their database record simply doesn't exist until they log in.
+* **The Deprovisioning Gap (Security Risk):** JIT is a "pull" mechanism triggered by logins. If an employee is fired, they won't log in, meaning JIT never tells your app to revoke their active sessions or API keys.
+
+#### 2. The Solution & Identity Mapping
+
+* **SCIM (RFC 7644):** An open REST API standard that solves JIT's flaws. It allows Identity Providers (Azure AD/Okta) to actively **push** lifecycle changes to your app in the background, completely bypassing the user.
+* **The `externalId` (The Anchor):** The immutable ID that ties your SaaS database record permanently to the customer's Azure AD record. You must use this to map users, as email addresses can change (e.g., due to marriage).
+
+#### 3. The Core SCIM Operations
+
+* **Pre-Provisioning (`POST /Users`):** Creates the user profile instantly when HR hires them. This allows the customer's IT admins to map the user to projects and workspaces *before* their first day of work.
+* **Group Sync (`POST /Groups` & `PATCH /Groups`):** Syncs massive internal corporate security groups directly to your SaaS application's internal ReBAC/PBAC roles, enabling automated bulk access.
+* **The Kill Switch (`PATCH /Users`):** When a user is terminated, SCIM pushes a payload replacing `active: true` with `active: false`. Your system must instantly react by triggering a backend event (e.g., via Redis Pub/Sub) to terminate live sessions.
+
+#### 4. Engineering for Reliability (Edge Cases)
+
+* **The Race Condition:** SCIM background syncs and SSO logins run on different timers. Always implement "Upsert" logic. If the user clicks SSO *before* the SCIM sync arrives, create the user. When SCIM arrives later, just map the `externalId` to the existing user instead of throwing an error.
+* **Idempotency:** Identity Providers will frequently send duplicate SCIM requests. Your `.NET` controllers must handle these duplicates gracefully without crashing or creating duplicate database rows.
 
 ---
-
-
----
-
