@@ -347,11 +347,11 @@ sequenceDiagram
 If Alice did not have the `writer` relationship to the `Generated_Thumbnail_eu` folder, the second SpiceDB check would fail instantly. OPA would return `{"allow": false}`, and the .NET API would block the request before a single byte of image data was ever processed or moved across regions. This guarantees strict data residency and access control using sub-millisecond graph lookups.
 
 ---
-# 🏛️ Phase 5: Deep Dive into the Zanzibar (ReBAC) Model
+### Phase 5: Deep Dive into the Zanzibar (ReBAC) Model
 
 To make Zanzibar work in your architecture, you don't build SQL tables. You write a **Schema** defining the relationships, and you use an SDK to write **Tuples**.
 
-### 1️⃣ Understanding the "Definition" (The Container)
+##### 1️⃣ Understanding the "Definition" (The Container)
 
 In Zanzibar, a **`definition`** acts as a secure container. Think of it as the **Blueprint** or the **Rules of the World** for a specific object type.
 
@@ -360,7 +360,7 @@ In Zanzibar, a **`definition`** acts as a secure container. Think of it as the *
 
 If a user is not linked to that container through one of the defined relations (**Roles**), they are invisible to it. They have **zero access** by default.
 
-### 2️⃣ Side-by-Side: SQL vs. Zanzibar
+##### 2️⃣ Side-by-Side: SQL vs. Zanzibar
 
 To understand Zanzibar, compare it to the traditional Relational (SQL) approach:
 
@@ -372,7 +372,7 @@ To understand Zanzibar, compare it to the traditional Relational (SQL) approach:
 
 ---
 
-### 3️⃣ The Zanzibar Schema (The Logic)
+##### 3️⃣ The Zanzibar Schema (The Logic)
 
 The schema defines the **Roles** users can hold and the **Permissions** those roles grant.
 
@@ -401,7 +401,7 @@ definition folder {
 
 ---
 
-### 4️⃣ The Anatomy of a Zanzibar "Row" (The Tuple)
+##### 4️⃣ The Anatomy of a Zanzibar "Row" (The Tuple)
 
 Data does not live in columns; it lives in **Relationship Tuples**. A Tuple is a simple string that creates a directed arrow from an object to a subject.
 
@@ -415,7 +415,7 @@ Data does not live in columns; it lives in **Relationship Tuples**. A Tuple is a
 
 ---
 
-### ⚡ 5️⃣ Why Zanzibar Wins: The Inheritance Power
+##### ⚡ 5️⃣ Why Zanzibar Wins: The Inheritance Power
 
 In SQL, the database is "dumb." Your C# code must be "smart" enough to know that an Admin is allowed to view things. This often leads to **Spaghetti Code**.
 
@@ -440,7 +440,7 @@ The logic is baked directly into the **Definition**. When the .NET API asks: *"C
 
 ---
 
-### 6️⃣ C# Example: How to Insert a Row (Write a Tuple)
+##### 6️⃣ C# Example: How to Insert a Row (Write a Tuple)
 
 In SQL, you use `INSERT INTO`. In Zanzibar (SpiceDB), you use `WriteRelationships`. This adds the relationship arrow to the graph.
 
@@ -470,7 +470,7 @@ await _spiceDbClient.WriteRelationshipsAsync(new WriteRelationshipsRequest { Upd
 
 ---
 
-### 7️⃣ How the Permission Logic Queries the Rows
+##### 7️⃣ How the Permission Logic Queries the Rows
 
 Permissions are **dynamic queries**. When you define `permission write = writer + admin`, and Alice tries to upload a file, Zanzibar performs a lightning-fast parallel search:
 
@@ -481,7 +481,7 @@ Because your definition says `writer OR admin`, Zanzibar returns **TRUE**. If a 
 
 ---
 
-### 8️⃣ The .NET Implementation: Access Elevation
+##### 8️⃣ The .NET Implementation: Access Elevation
 
 When we "temporarily elevated" Alice to a Folder Admin in our scenario, we did not update a SQL database. Instead, a specialized .NET Identity microservice pushed a Tuple into SpiceDB using gRPC.
 
@@ -529,7 +529,7 @@ public class AccessElevationService
 
 ```
 
-### 🗣️ Summary for the Whiteboard
+##### Summary for the Whiteboard
 
 * **The Definition:** The Blueprint. Defines what **Roles** exist and what powers they have.
 * **The Tuple:** The Data. The "row" that connects a specific person to a specific folder via a **Role**.
@@ -537,7 +537,7 @@ public class AccessElevationService
 
 ---
 
-### 🌐 The Beauty of the Graph
+##### The Beauty of the Graph
 
 Because the relationship now mathematically exists in the graph, the next time the .NET API asks: *"Can Alice save to this folder?"*, it performs a blazing-fast gRPC `CheckPermission` call. SpiceDB finds the role-based tuple and returns **true** in approximately **2 milliseconds**.
 
