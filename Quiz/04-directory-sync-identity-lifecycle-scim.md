@@ -46,6 +46,8 @@ When Acme Corp purchases a license for your software, their internal IT Administ
 1. **Your SCIM Base URL:** A dedicated API endpoint route hosted on your servers (e.g., `https://api.thumbnailmaker.com/scim/v2`).
 2. **A Long-Lived Bearer Token:** A cryptographically secure API key that you generate specifically for Acme Corp. This token authenticates Acme Corp's Azure AD and ensures that the incoming data is written strictly into Acme Corp's secure database shard on your end, preventing any cross-tenant data leakage.
 
+
+
 Acme Corp's IT Admin takes this URL and Token, logs into *their* Azure AD portal, and establishes the persistent backend-to-backend pipeline.
 
 #### Automated Operational Flow (Lifecycle Events)
@@ -54,43 +56,7 @@ Once connected, Acme Corp's Azure AD effectively becomes the "Puppet Master." Yo
 
 The automated end-to-end operational flow when an employee lifecycle event occurs (using a Termination scenario as the primary example):
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant WD as Acme Corp (HR: Workday)
-    participant AAD as Acme Corp (IdP: Azure AD)
-    participant TM_API as Thumbnail Maker SaaS API<br/>(Endpoint: https://api.thumbnailmaker.com/scim/v2)
-    participant TM_DB as SaaS Database<br/>(AcmeCorp Tenant Shard)
-    participant TM_IS as SaaS Internal Services<br/>(Session Revocation/Kill Switch)
 
-    Note over AAD, TM_API: PRE-REQUISITE (Setup Phase): IT Admin has pasted Base URL & Bearer Token into Azure AD.
-
-    Note over AAD: Polled Inbound Provisioning Integration (e.g., Every ~40 mins)
-    AAD->>WD: scheduled API Call: GET Workday HR data changes
-    WD-->>AAD: Response: Alice Smith status changed to 'Terminated'
-
-    rect rgba(255, 50, 50, 0.15)
-        Note right of AAD: (1) AAD disables Alice's corporate account identity.
-        
-        AAD->>TM_API: (2) SCIM PUSH (Backend-to-Backend Call):<br/>PATCH /Users/{id}<br/>Authorization: Bearer [Tenant_Specific_Token_1]<br/>Payload: { active: false }
-        activate TM_API
-        
-        TM_API->>TM_DB: (3) EXECUTE LOGIC:<br/>UPDATE Users SET IsActive = false<br/>WHERE ExternalId = {aad_id}
-        TM_DB-->>TM_API: Success: SaaS DB Updated.
-        
-        TM_API->>TM_IS: (4) TRIGGER KILL SWITCH:<br/>Publish "Hard Revoke" Event for Alice
-        
-        par Parallel Action Execution
-            TM_IS-->>TM_IS: Instantly Revoke Active Web Session Cookies
-        and
-            TM_IS-->>TM_IS: Instantly Revoke Hardcoded API Keys
-        end
-
-        TM_API-->>AAD: (5) Response: 200 OK (User Disabled Globally)
-        deactivate TM_API
-    end
-
-```
 
 ### Explanation of the Diagram's Operational Flow:
 
