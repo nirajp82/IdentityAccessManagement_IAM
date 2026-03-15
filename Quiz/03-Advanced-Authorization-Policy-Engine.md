@@ -1103,71 +1103,73 @@ Using the Audit Service from Phase 7, we capture exactly who Bob is impersonatin
 4. **No Backdoors:** "Assume Role" replaces hardcoded "Super Admin" passwords.
    
 ---
+
 ### Phase 9: Machine-to-Machine (The "Zero-Secret" Architecture)
 
-In a traditional setup, you’d give your .NET app a "Password" (Secret) stored in a `web.config` or an Environment Variable. In a **Zero-Secret** architecture, the machine uses its **Physical Identity** to prove who it is.
+In a traditional setup, you’d give your .NET app a "Password" (Secret) stored in a `web.config`. In a **Zero-Secret** architecture, we use **SPIFFE** (Secure Production Identity Framework for Everyone) to give every workload a cryptographic identity based on its **Physical Provenance**.
 
 #### 1. The Problem: Static Secrets
 
 When you hardcode a Stripe API key or a Database password into your Windows Server settings:
 
 * **Leakage:** If a hacker gets into that server, they just type `set` in the command prompt and see all your passwords.
-* **Rotation:** Changing that password means remote-desktoping into 20 servers to update them.
+* **Rotation:** Changing that password means manual intervention on 20 servers.
 
-**The Solution:** Use **Workload Identity**. The server "proves" it is the legitimate "Billing Server" based on its hardware and location, not a password.
+**The Solution:** Use **Workload Attestation**. The server "proves" it is the legitimate "Billing Server" based on its hardware and location, not a password.
 
-#### 2. How we engineer the Zero-Secret Architecture (Windows/VM Style)
+#### 2. How we engineer the Zero-Secret Architecture (The SPIFFE Way)
 
-We use three layers of defense based on the **Infrastructure** (Azure, AWS, or Windows Server).
+We use three layers of defense to ensure a machine can only act if it can *prove* it is the legitimate workload.
 
-**A. Attested Identity (The Metadata Service)**
-When your .NET AI Agent boots up on a Windows VM, it doesn't have a password. Instead, it calls a special "Local Identity Service" that only exists on that specific hardware.
+**A. Attested Identity (SPIFFE/SPIRE)**
+When your .NET AI Agent boots up on a Windows Server, it doesn't have a password. Instead, it talks to a local **SPIRE Agent** via a Windows Named Pipe or Unix socket.
 
-1. The .NET app asks the local machine: *"Who am I?"*
-2. The machine checks the local Windows **Security Identifier (SID)** or the Cloud Instance ID.
-3. It issues a short-lived (5-minute) **Identity Token** that is cryptographically signed by the Cloud Provider (Azure/AWS).
+1. **Workload Attestation:** The SPIRE Agent interrogates the OS to verify the **Process ID (PID)**, the **Windows Security Identifier (SID)**, and the **Cloud Instance ID**.
+2. **SVID Issuance:** Once the machine "proves" who it is, it is issued an **SVID** (SPIFFE Verifiable Identity Document). This is a short-lived (5-minute) X.509 certificate.
+3. **mTLS:** The machine uses this SVID to establish **mTLS (Mutual TLS)** for all internal communication.
 
 **B. Token Exchange (Workload Federation)**
-Your AI Agent needs to call Stripe, but Stripe doesn't know how to read Windows Identity tokens.
+Your AI Agent needs to call Stripe, but Stripe doesn't understand **SVID certificates**.
 
-1. The .NET app sends its Windows Identity Token to your **Security Token Service (STS)**.
-2. The STS validates that this token actually came from your "Production Billing Server."
-3. The STS "exchanges" it for a 5-minute Stripe token.
+1. The .NET app sends its internal **SPIFFE JWT** to your **Security Token Service (STS)**.
+2. The STS validates the signature from your internal SPIRE server.
+3. This is **Federation**: You are using your internal trust to gain external access without ever hardcoding a long-lived key in your C# code.
 
-**C. Sidecar Pattern (Local Proxy)**
-To keep your C# code clean, you don't write the "Exchange" logic in your app. You run a tiny local proxy service. Your .NET code just calls `http://localhost:8080/stripe`. The proxy handles the identity check, fetches the token, and forwards the call.
+**C. The Sidecar Pattern (Envoy Proxy)**
+To keep your C# code clean, an **Envoy Sidecar** sits next to your code. When your code tries to call `stripe.com`, Envoy intercepts the call, fetches the token from the STS using the workload's SVID, attaches the header, and sends it out.
+
 
 #### 3. Use Case: The .NET Billing Service & The Stripe API
 
 **The Scenario:** A .NET background service running on a Windows VM needs to call Stripe to charge a customer once a day.
 
 | Step | Action | Why it's Secure |
-| --- | --- | --- |
+|  |  |  |
 | **1. Boot** | Server starts with **ZERO** passwords in the config. | Nothing to steal from the hard drive or logs. |
-| **2. Attest** | App asks Windows/Cloud for a "Signed Identity." | Only the real, authorized server can get this ID. |
-| **3. Exchange** | STS swaps Windows ID for a Stripe Token. | The "Stripe Secret" is never sent to the VM. |
+| **2. Attest** | SPIRE Agent verifies Windows SID/Instance ID. | Only the real, authorized server can get an identity. |
+| **3. Exchange** | STS swaps **SPIFFE SVID** for a Stripe Token. | The "Stripe Secret" is never sent to the VM. |
 | **4. Scoped** | STS limits the token strictly to `stripe.com`. | If stolen, it can't be used to access your DB. |
 | **5. Network** | Token is bound to the Server's IP address. | A hacker cannot use the token from their own laptop. |
 
 #### 4. Implementation: The STS Token Exchange (.NET C#)
 
-This is how your internal Token Service "swaps" a **VM/Cloud Identity** for an external API token. Notice we are checking the **Instance ID** (the server's fingerprint) instead of a K8s namespace.
+This is how your internal Token Service "swaps" a **SPIFFE Identity** for an external API token. Notice we are checking the **SPIFFE ID** (the universal name for the workload).
 
 ```csharp
-public async Task<string> ExchangeInstanceIdForStripeToken(string cloudIdentityToken)
+public async Task<string> ExchangeSpiffeForStripeToken(string spiffeJwtToken)
 {
-    // 1. Validate the Token (Proof that this is actually our Server)
-    // We check the signature from Azure/AWS/Windows
-    var principal = await _tokenValidator.ValidateCloudIdentityAsync(cloudIdentityToken);
+    // 1. Validate the SPIFFE Token (Proof of Origin)
+    // We verify the signature against our internal SPIRE Authority
+    var principal = await _tokenValidator.ValidateSpiffeJwtAsync(spiffeJwtToken);
     
-    // 2. Verify this specific Server is the "Billing-VM-01"
-    if (principal.InstanceId != "billing-vm-prod-001")
+    // 2. Verify this specific Workload is the authorized Billing Bot
+    // SPIFFE IDs look like: spiffe://example.org/ns/prod/sa/billing-bot
+    if (principal.SpiffeId != "spiffe://mycompany.com/billing-service")
     {
-        throw new UnauthorizedAccessException("Hardware attestation failed. Identity mismatch.");
+        throw new UnauthorizedAccessException("Workload attestation failed. Invalid SPIFFE ID.");
     }
 
-    // 3. Fetch the REAL Stripe Secret from a secure Vault (Vault/KeyVault)
-    // The VM itself never sees this "Master Key"
+    // 3. Fetch the REAL Stripe Secret from a secure Vault
     var stripeKey = await _vaultClient.GetSecretAsync("stripe-prod-key");
 
     // 4. Mint a "Downscoped" token that expires in 5 minutes
@@ -1178,10 +1180,10 @@ public async Task<string> ExchangeInstanceIdForStripeToken(string cloudIdentityT
 
 ### 🗣️ Summary of the Zero-Secret Strategy
 
-1. **Identity is Local:** Machines get their ID from the hardware/infrastructure (Windows SID or Cloud Instance ID), not from a file.
-2. **Short-Lived is Safe:** If a hacker manages to steal a token from memory, it becomes useless in 5 minutes.
-3. **Audience Binding:** Tokens only work for one target (e.g., Stripe). They are not "Master Keys."
-4. **Blast Radius:** By binding tokens to the server's IP address, you ensure stolen credentials cannot be used from a different location.
+* **Identity is Local:** Machines get their identity from the infrastructure (SPIFFE/SVID), not from a config file.
+* **Short-Lived is Safe:** SVIDs and tokens expire in minutes. If stolen, they are "paperweights" almost immediately.
+* **Audience Binding:** Tokens are minted for a specific "Audience" (Stripe). They cannot be reused for other services.
+* **Blast Radius:** By binding tokens to IP addresses/CIDR blocks, you ensure stolen credentials cannot be used "off-site."
 
 ---
 
