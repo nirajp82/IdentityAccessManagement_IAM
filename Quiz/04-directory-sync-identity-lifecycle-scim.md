@@ -505,3 +505,27 @@ Instead of a random list of terms, I have structured it as **The Problem**, **Th
 * **Idempotency:** Identity Providers will frequently send duplicate SCIM requests. Your `.NET` controllers must handle these duplicates gracefully without crashing or creating duplicate database rows.
 
 ---
+
+
+### Whiteboard FAQ: Defending the Identity Lifecycle
+
+**Q: Why use SCIM instead of waiting for the user to log in via SSO (JIT)?**
+
+> **A:** JIT (Just-In-Time) only creates the user *after* they log in. If an IT Admin wants to assign a new hire, Alice, to a specific Premium Batch-Rendering Workspace on Friday so she is ready for her first day on Monday, they can't. Because Alice hasn't logged in yet, her database record doesn't exist—she is a "Ghost User." SCIM solves this by *pre-provisioning* the user the moment HR creates her profile. Azure AD pushes her data to your API immediately, ensuring she is fully configured and visible in your SaaS app's admin panel before Day 1.
+
+**Q: How does SCIM improve security (Deprovisioning)?**
+
+> **A:** JIT relies on the user actively logging in to pull data, which means it has no way to handle terminations (a fired employee won't log in just to delete themselves). Without SCIM, deprovisioning requires a manual, error-prone step by an IT Admin, frequently leaving behind dangerous "Zombie Accounts."
+> With SCIM, the millisecond an engineer is terminated in the customer's HR system, their Identity Provider (Okta/Azure AD) pushes a SCIM `PATCH (active: false)` directly to your API. Your system receives this webhook and automatically triggers the "Kill Switch" to immediately destroy their active web sessions and revoke any hardcoded cloud infrastructure keys.
+
+**Q: Why do we need the `/Groups` endpoint if the `/Users` endpoint already tells us the user's Department?**
+
+> **A:** Because a "Department" is just a static text label, but a "Group" is a dynamic access control tool. If Acme Corp has 50 designers but only wants to pay for 10 Premium Workspace licenses, the IT Admin can't just grant access by `Department = 'Design'`. Instead, they create an Azure AD security group called `Thumbnail_Premium_Users` and drop those 10 specific people into it. The `/Groups` endpoint sends your API an explicit array of those 10 IDs, allowing your app to instantly map them to the Premium Role in your database (or ReBAC Graph).
+
+**Q: How do we secure the SCIM endpoint itself?**
+
+> **A:** You generate a long-lived, cryptographically secure Bearer Token unique to that specific enterprise tenant (e.g., `AcmeCorp_Scim_Key`). When Azure AD makes requests, it passes this token in the header. Your API middleware validates the token, extracts the `Tenant_ID`, and ensures the incoming SCIM sync only creates or modifies users within Acme Corp's secure database shard.
+
+**Q: What happens if Azure AD sends a SCIM request, but our API is down for maintenance?**
+
+> **A:** SCIM is designed for eventual consistency. If your Thumbnail Maker API returns a 500 error or is unreachable, Azure AD places that SCIM event into a retry queue. It will back off and try again later, ensuring that the customer's directory eventually reaches total synchronization once your servers are back online.
