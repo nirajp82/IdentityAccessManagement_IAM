@@ -649,6 +649,223 @@ If you use caching (Phase 6), you introduce a dangerous race condition. You must
 1. **The Push-Based Pub/Sub Channel:** Do not rely on APIs to "poll" for changes. We deploy a high-throughput broker (Redis Pub/Sub or Kafka). When the Admin clicks Revoke, the central server broadcasts a targeted JSON event: `{ "action": "hard_revoke", "subject": "Alice" }`.
 2. **Targeted Eviction:** Every .NET API sidecar listens to this channel. Within milliseconds, the API instantly purges *only* Alice's token from its local cache. On the next mouse click, the API asks the Policy Engine, sees the suspended state, and returns `403 Forbidden`.
 
+To implement a real-time "Kill Switch," we need to integrate **Redis Pub/Sub** with your `.NET API`. The goal is to ensure that as soon as the security team clicks "Revoke," every running instance of your API clears Alice's specific permissions from its `IMemoryCache`.
+
+Here is the implementation using the **StackExchange.Redis** library.
+
+#### 1. The Revocation Service (The Broadcaster)
+
+This service is used by your Admin Dashboard or Security Tool to broadcast the "Revoke" signal across the entire global infrastructure.
+
+```csharp
+using StackExchange.Redis;
+using System.Text.Json;
+
+public class SecurityRevocationService
+{
+    private readonly ISubscriber _subscriber;
+    private const string RevocationChannel = "authz:revocations";
+
+    public SecurityRevocationService(IConnectionMultiplexer redis)
+    {
+        _subscriber = redis.GetSubscriber();
+    }
+
+    public async Task RevokeUserAccessAsync(string userId)
+    {
+        var message = new { action = "hard_revoke", subject = userId };
+        string json = JsonSerializer.Serialize(message);
+
+        // Broadcast to all API instances globally
+        await _subscriber.PublishAsync(RedisChannel.Literal(RevocationChannel), json);
+    }
+}
+
+```
+
+#### 2. The Cache Listener (The Kill Switch)
+
+This is a **Background Service** that runs inside your .NET API. It listens for revocation messages and purges the local memory cache instantly.
+
+```csharp
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
+using StackExchange.Redis;
+using System.Text.Json;
+
+public class RevocationListenerService : BackgroundService
+{
+    private readonly ISubscriber _subscriber;
+    private readonly IMemoryCache _cache;
+    private const string RevocationChannel = "authz:revocations";
+
+    public RevocationListenerService(IConnectionMultiplexer redis, IMemoryCache cache)
+    {
+        _subscriber = redis.GetSubscriber();
+        _cache = cache;
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        return _subscriber.SubscribeAsync(RedisChannel.Literal(RevocationChannel), (channel, message) =>
+        {
+            var data = JsonDocument.Parse(message.ToString());
+            var userId = data.RootElement.GetProperty("subject").GetString();
+
+            // INSTANT EVICTION: Remove only Alice's cached decisions
+            // This forces the next request to re-verify with the Policy Engine
+            _cache.Remove($"authz_cache:{userId}");
+            
+            Console.WriteLine($"[SECURITY] Evicted cache for user: {userId} due to Hard Revoke.");
+        });
+    }
+}
+
+```
+
+#### 3. Updated Policy Client (The Enforcement)
+
+This is how your API checks the cache before asking the Policy Engine.
+
+```csharp
+public async Task<bool> IsAuthorizedAsync(string userId, string action, string resource)
+{
+    string cacheKey = $"authz_cache:{userId}";
+
+    // 1. Check local IMemoryCache (The Hot Path)
+    if (_cache.TryGetValue(cacheKey, out bool cachedDecision))
+    {
+        return cachedDecision;
+    }
+
+    // 2. If not in cache (or evicted by the Kill Switch), ask the PDP
+    bool freshDecision = await _pdpClient.CheckWithPolicyEngine(userId, action, resource);
+
+    // 3. Store in cache for a short duration (e.g., 5 mins)
+    _cache.Set(cacheKey, freshDecision, TimeSpan.FromMinutes(5));
+
+    return freshDecision;
+}
+
+```
+
+#### ⚡ How the Flow Works:
+
+1. **Request 1:** Alice clicks "Generate Thumbnail." The API checks the cache (Empty) $\rightarrow$ asks the Policy Engine (Allow) $\rightarrow$ Caches "Allow" for 5 mins.
+2. **The Event:** Admin clicks **Revoke**. The `SecurityRevocationService` publishes Alice's ID to Redis.
+3. **The Kill Switch:** The `RevocationListenerService` (running in every API instance) receives the message and calls `_cache.Remove("authz_cache:alice")`.
+4. **Request 2 (Milliseconds later):** The hacker clicks "Export." The API checks the cache (Missing because of the kill switch) $\rightarrow$ asks the Policy Engine $\rightarrow$ The Policy Engine sees Alice is suspended $\rightarrow$ **Returns 403 Forbidden.**
+
+#### Why this is better than "Polling":
+
+If you used a standard TTL (Time To Live) of 5 minutes, the hacker would have a 5-minute window to do damage. With this **Push-Based** architecture, the window of vulnerability is reduced to the network latency of Redis (typically **<20ms**).
+
+To complete your security architecture, we need to implement the **Soft Revocation** method.
+
+While **Hard Revocation** (the "Kill Switch") is for emergencies like a compromised laptop, **Soft Revocation** is used for routine changes (like a user changing departments or a folder being renamed). Instead of deleting the cache entry, we "stale" it. This forces the API to re-verify permissions in the background without causing a "Thundering Herd" (where every user request hits the database at the exact same second).
+
+#### 1. The Soft Revocation Message
+
+First, we add a method to the `SecurityRevocationService` to broadcast a "Soft" signal.
+
+```csharp
+public async Task SoftRevokeAccessAsync(string userId)
+{
+    // We send a 'soft_revoke' action instead of 'hard_revoke'
+    var message = new { action = "soft_revoke", subject = userId };
+    string json = JsonSerializer.Serialize(message);
+
+    await _subscriber.PublishAsync(RedisChannel.Literal(RevocationChannel), json);
+}
+
+```
+
+#### 2. The Smart Cache Wrapper
+
+To handle a "Soft Revoke," we need a more advanced cache object. Instead of just storing a `bool`, we store an object that knows if it is "Stale."
+
+```csharp
+public class AuthzDecision
+{
+    public bool IsAllowed { get; set; }
+    public bool IsStale { get; set; } // The flag for Soft Revocation
+}
+
+```
+
+#### 3. The Graceful Listener
+
+The listener now handles both cases. If it's a **Hard Revoke**, it deletes the entry. If it's a **Soft Revoke**, it just marks it as stale.
+
+```csharp
+protected override Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    return _subscriber.SubscribeAsync(RedisChannel.Literal(RevocationChannel), (channel, message) =>
+    {
+        var data = JsonDocument.Parse(message.ToString());
+        var userId = data.RootElement.GetProperty("subject").GetString();
+        var action = data.RootElement.GetProperty("action").GetString();
+
+        string cacheKey = $"authz_cache:{userId}";
+
+        if (action == "hard_revoke")
+        {
+            _cache.Remove(cacheKey); // Instant Delete
+        }
+        else if (action == "soft_revoke")
+        {
+            // Soft Revoke: Keep the data, but mark it for refresh
+            if (_cache.TryGetValue(cacheKey, out AuthzDecision decision))
+            {
+                decision.IsStale = true; 
+                _cache.Set(cacheKey, decision);
+            }
+        }
+    });
+}
+
+```
+
+#### 4. The Optimized Enforcement Flow
+
+This is the "Architectural Masterpiece" part. If a decision is **Stale**, the API continues to let the user work (so they don't see a loading spinner), but it fires off a background task to refresh the cache from the Policy Engine.
+
+```csharp
+public async Task<bool> IsAuthorizedAsync(string userId, string action, string resource)
+{
+    string cacheKey = $"authz_cache:{userId}";
+
+    if (_cache.TryGetValue(cacheKey, out AuthzDecision decision))
+    {
+        // If it's stale, refresh it in the background but don't block the user
+        if (decision.IsStale)
+        {
+            _ = Task.Run(async () => {
+                var freshDecision = await _pdpClient.CheckWithPolicyEngine(userId, action, resource);
+                _cache.Set(cacheKey, new AuthzDecision { IsAllowed = freshDecision, IsStale = false });
+            });
+        }
+        return decision.IsAllowed;
+    }
+
+    // Standard path if no cache exists
+    var result = await _pdpClient.CheckWithPolicyEngine(userId, action, resource);
+    _cache.Set(cacheKey, new AuthzDecision { IsAllowed = result, IsStale = false });
+    return result;
+}
+
+```
+
+### 🏛️ Final Summary: Hard vs. Soft Revocation
+
+| Feature | Hard Revocation (Kill Switch) | Soft Revocation (Graceful) |
+| --- | --- | --- |
+| **Trigger** | Security Breach / Laptop Theft | Normal Role Change / Billing Update |
+| **Action** | `_cache.Remove()` | `decision.IsStale = true` |
+| **User Experience** | Immediate 403 Forbidden | Zero interruption |
+| **System Impact** | High (Thundering Herd risk) | Low (Distributed background refresh) |
+| **Latency** | Re-verifies on current request | Re-verifies in background for next request |
+
 ---
 
 ### Phase 8: Multi-Tenant Isolation & Cross-Account Delegation
