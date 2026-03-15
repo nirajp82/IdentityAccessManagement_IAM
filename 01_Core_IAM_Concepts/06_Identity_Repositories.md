@@ -164,10 +164,12 @@ For external apps like Slack, the Access Plane acts as the **IdP** (Identity Pro
 
 * **The Cryptographic Flow:**
 1. **The Redirection:** Alice goes to `moneyguard.slack.com`. Slack (**SP**) identifies the domain and redirects her browser to our **Access Plane** (**IdP**).
-2. **The PRT Exchange:** The Access Plane detects the **PRT** already sitting on her laptop. Because she is already logged in securely to the device, she is **not** prompted for a password.
-3. **The Assertion (The Signed Note):** The Access Plane (**IdP**) creates a **SAML Assertion**. It signs this digital "voucher" with a **Private Key** that only *MoneyGuard* controls.
-4. **The Validation:** The voucher is sent back to Slack (**SP**). Slack uses our **Public Key** (exchanged during initial federation setup) to verify the signature.
-5. **The Result:** Slack confirms the signature is authentic and grants Alice access.
+2. **The PRT Exchange (Seamless SSO):** When Alice's browser lands on the Access Plane, the IdP does not immediately ask for a password. Instead, it sends a silent cryptographic challenge to the browser.
+    * **Where it looks:** The browser (using native OS integration like Microsoft Edge, or a specific extension like the Windows Accounts plugin for Chrome) communicates directly with the laptop's Operating System. It looks inside the device's secure hardware enclave (like the TPM chip or Windows Local Security Authority) where the **Primary Refresh Token (PRT)** was securely vaulted when Alice first unlocked her laptop that morning.
+    * **How it detects it:** The browser asks the OS to use the PRT to mathematically sign the IdP's challenge. The browser then passes this signed cryptographic proof back to the Access Plane via hidden HTTP headers. Because the Access Plane verifies the signature, it knows Alice is already actively authenticated to a trusted corporate device, and logs her into Slack instantly without ever showing a password prompt.
+4. **The Assertion (The Signed Note):** The Access Plane (**IdP**) creates a **SAML Assertion**. It signs this digital "voucher" with a **Private Key** that only *MoneyGuard* controls.
+5. **The Validation:** The voucher is sent back to Slack (**SP**). Slack uses our **Public Key** (exchanged during initial federation setup) to verify the signature.
+6. **The Result:** Slack confirms the signature is authentic and grants Alice access.
 
 
 * **The Security Benefit:** Slack never sees Alice's password. Even if Slack is breached, our credentials remain safe within the Access Plane.
