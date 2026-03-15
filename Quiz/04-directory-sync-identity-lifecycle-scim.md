@@ -35,7 +35,9 @@ JIT is purely a "pull" mechanism—it only triggers when the user actively tries
 
 #### The "Universal Translator" Concept
 
-Every Identity Provider (IdP) and SaaS application uses a different database structure. To bridge this gap, you, as the builder of the **Thumbnail Maker SaaS application**, must implement the **SCIM standard (RFC 7644)**. This standard acts as a "Universal Translator," enforcing a strict, standardized REST API structure and JSON schema that ensures any corporate enterprise Identity Provider (like Acme Corp's Azure AD) can communicate user lifecycle changes directly to your application without human intervention.
+Every Identity Provider (Azure AD, Okta, Ping Identity) and every SaaS app has a differently designed database. If Acme Corp's Okta calls a user's department department_name and your Thumbnail Maker app calls it business_unit, they cannot talk to each other.
+
+SCIM acts as a "Universal Translator." It dictates a strict, non-negotiable REST API structure and JSON schema. By building your Thumbnail Maker API to this exact standard, you guarantee that your application can instantly understand synchronization commands from any major enterprise Identity Provider that Acme Corp might use.
 
 #### Setup (The Handshake)
 
