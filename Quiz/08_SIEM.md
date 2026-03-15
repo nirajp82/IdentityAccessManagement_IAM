@@ -1,4 +1,4 @@
-# 📊 Day 7: Observability, Logging, & SIEM
+#  Day 8: Observability, Logging, & SIEM
 
 **Topic:** Centralizing security telemetry to detect, investigate, and respond to threats.
 
