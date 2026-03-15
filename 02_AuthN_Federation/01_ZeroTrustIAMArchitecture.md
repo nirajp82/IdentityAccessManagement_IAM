@@ -691,3 +691,68 @@ Rather than waiting for the API Gateway to ask if a token is valid, the IdP and 
 * `high_risk_ip_detected`
 
 If the API Gateway receives a `password_changed` event for Alice, it can instantly flush all active sessions and block any JWTs bearing her user ID (`sub` claim) that were issued prior to the timestamp of the password change, forcing an immediate re-authentication.
+
+---
+## 11. Use Case: Just-In-Time (JIT) Access & Privileged Identity Management (Zero Standing Privileges)
+
+**Question:** *How do we eliminate standing admin privileges in the MoneyGuard ecosystem and implement Just-In-Time (JIT) access for both Human users and Machine Identities when elevated permissions are required?*
+
+**Detailed Answer:**
+Modern Zero-Trust IAM systems operate on the principle of **Zero Standing Privileges (ZSP)**. This means a user or service has zero administrative privileges by default. High privileges exist only when absolutely necessary, are explicitly approved, and automatically evaporate when the task is complete. 
+
+Achieving this requires different architectural approaches for Humans (using OIDC and PAM brokers) versus Machines (using SPIFFE/Client Credentials and dynamic OPA policies).
+
+### A. JIT Access for Human Identities (OIDC & PAM Integration)
+
+For human users (e.g., a MoneyGuard Database Admin needing to run a migration), JIT relies on an external workflow engine (ITSM like ServiceNow) and short-lived tokens.
+
+1. **Zero Privileges by Default:** The admin logs into the MoneyGuard portal via the IdP (`idp.moneyguard.com`). Their baseline JWT contains standard user roles. They cannot access production databases.
+2. **The Request:** The admin navigates to the Privileged Access Management (PAM) portal and requests the `db_admin_prod` role, linking a valid Jira/ServiceNow ticket for the migration.
+3. **Approval & Step-Up Auth:** A manager approves the request. The PAM broker temporarily adds the admin to the elevated group in the Identity Store. The portal immediately forces the admin's browser to perform a **Step-Up Authentication** via OIDC (prompting for a YubiKey MFA tap).
+4. **Time-Bound Token Issuance:** The IAM Control Plane issues a *new* JWT. This token contains the elevated `"role": "db_admin_prod"` claim, but it is issued with a strict, aggressively short expiration time (`exp` set to exactly 2 hours).
+5. **Automatic Revocation:** After 2 hours, the JWT organically expires. The PAM broker automatically strips the role from the Identity Store. If the admin tries to make another API call, the PEP gateway rejects the expired token. No manual cleanup is required.
+
+### B. JIT Access for Machine Identities (M2M / Dynamic Policies)
+
+Machine identities (like an automated nightly backup script) cannot click "approve" or pass MFA. Therefore, JIT access relies on dynamic policy updates at the Policy Decision Point (PDP), rather than issuing new tokens.
+
+1. **Zero Privileges by Default:** The backup workload boots up. It requests a baseline standard token (or SPIFFE SVID) from the IAM Control Plane. By default, the Open Policy Agent (PDP) rules deny this workload access to the `Core Ledger Service`.
+2. **The Request:** The workload orchestration engine (e.g., a Kubernetes CronJob controller) signals the IAM Control Plane that a scheduled backup window is starting.
+3. **Dynamic Policy Injection (Approval):** Instead of changing the workload's identity token, the central IAM Control Plane dynamically injects a temporary rule into the local Open Policy Agent (PDP) running next to the Ledger Service. 
+4. **Enforcement:** The backup workload makes its API call. The PEP intercepts it and asks the PDP. The newly injected Rego policy states: *"Allow the `backup-script` identity to read the ledger, but ONLY between 2:00 AM and 3:00 AM."*
+5. **Automatic Revocation:** At 3:01 AM, the dynamic rule times out in the PDP. The workload's access is instantly severed, even if its underlying token is still mathematically valid.
+
+### JIT Access Architecture Flow (Human Example)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    
+    participant Admin as Database Admin
+    participant PAM as PAM / ITSM Portal
+    participant IAM as auth.moneyguard.com (IAM)
+    participant PEP as api.moneyguard.com (PEP)
+
+    Note over Admin, IAM: Phase 1: Baseline Access
+    Admin->>IAM: Standard Login
+    IAM-->>Admin: Returns Baseline JWT (No Admin Rights)
+    
+    Note over Admin, IAM: Phase 2: The JIT Request
+    Admin->>PAM: Request 'db_admin' for Ticket #REQ-998 (2 Hours)
+    PAM->>PAM: Manager Approves Request
+    PAM->>IAM: API Call: Add User to 'db_admin' group temporarily
+    
+    Note over Admin, IAM: Phase 3: Step-Up & Elevation
+    PAM-->>Admin: Prompt Step-Up Auth (MFA Required)
+    Admin->>IAM: Re-Authenticate with YubiKey
+    IAM-->>Admin: Returns Elevated JWT (Expires in 2 Hours)
+    
+    Note over Admin, PEP: Phase 4: Execution & Expiration
+    Admin->>PEP: Execute DB Migration + Elevated JWT
+    PEP-->>Admin: 200 OK (Allowed by PDP)
+    
+    Note over Admin, IAM: 2 Hours Later...
+    PAM->>IAM: API Call: Remove User from 'db_admin' group
+    Admin->>PEP: Execute DB Migration + Elevated JWT
+    PEP-->>Admin: 401 Unauthorized (Token Expired)
+```
