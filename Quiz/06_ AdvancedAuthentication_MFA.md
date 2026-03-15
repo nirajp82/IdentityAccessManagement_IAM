@@ -1,0 +1,220 @@
+# Day 6: Advanced Authentication & MFA
+
+**Topic:** Protecting the platform from credential theft, brute force, and advanced phishing.
+
+If Day 5 was about how *machines* prove their identity without passwords, Day 6 is about how *human beings* prove theirs in an era where passwords are fundamentally broken.
+
+When a single compromised engineer account can lead to the deletion of a production cluster of $300,000 worth of GPUs, standard username/password combinations—and even basic 6-digit text message codes—are no longer sufficient. We must implement cryptographic, phishing-resistant workflows and dynamically adjust our trust based on what the user is trying to do.
+
+---
+
+### Phase 1: The Threat Landscape (Why Standard MFA Fails)
+
+To understand why we build advanced authentication, we have to look at how modern attackers easily bypass legacy security.
+
+#### Threat 1: Credential Stuffing (The Brute Force)
+
+Attackers buy databases of billions of leaked passwords from other website breaches. They use automated botnets to try these email/password combinations against your Thumbnail Maker SaaS login page at a rate of 10,000 requests per second, knowing that humans reuse passwords.
+
+#### Threat 2: Adversary-in-the-Middle (AiTM) Phishing
+
+For years, the industry relied on Time-based One-Time Passwords (TOTP), like the 6-digit codes from Google Authenticator.
+**The fatal flaw:** These are easily defeated by AiTM attacks. A hacker sends an engineer an email linking to `thunbnail-maker.com` (notice the typo). The fake site acts as a proxy. The engineer types their password and their 6-digit code. The proxy instantly forwards those to the *real* site, logs in, steals the session cookie, and the hacker now has full access.
+
+To defeat these, we must upgrade our architecture at the network edge and at the identity layer.
+
+---
+
+### Phase 2: Stopping the Bots (Rate Limiting)
+
+Before we even worry about advanced cryptography, we must protect the `/login` endpoint from being hammered by credential stuffing botnets.
+
+In modern .NET, we don't build custom rate limiters in the controller. We use the built-in `Microsoft.AspNetCore.RateLimiting` middleware to drop malicious traffic at the Kestrel web server level, before the application even attempts to query the database.
+
+**The .NET Implementation:**
+Here is how we implement a strict **Fixed Window Rate Limiter** that locks down the login endpoint by IP address.
+
+```csharp
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Define the Rate Limiting Policy
+builder.Services.AddRateLimiter(options =>
+{
+    // Apply this specific policy to the Login endpoint
+    options.AddPolicy("StrictLoginPolicy", context =>
+    {
+        // Get the client's IP Address
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: remoteIp,
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 5, // Maximum 5 attempts
+                Window = TimeSpan.FromMinutes(15), // Per 15-minute window
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0 // Drop requests immediately if over limit
+            });
+    });
+
+    // Return a 429 Too Many Requests when the limit is hit
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
+var app = builder.Build();
+app.UseRateLimiter(); // Enable the middleware
+
+// 2. Apply the policy to the specific endpoint
+app.MapPost("/api/auth/login", async (LoginDto request) => {
+    // Authentication logic here
+    return Results.Ok(new { Token = "jwt_here" });
+}).RequireRateLimiting("StrictLoginPolicy");
+
+app.Run();
+
+```
+
+**Architectural Benefit:** If a botnet tries 1,000 passwords from a single IP, the first 5 hit your database. The remaining 995 are instantly rejected by the web server with a `429 Too Many Requests` with almost zero CPU overhead.
+
+---
+
+### Phase 3: Phishing-Resistant MFA (WebAuthn & Passkeys)
+
+To solve the AiTM phishing problem, we must abandon shared secrets (passwords and 6-digit codes) and move to **WebAuthn (FIDO2)**.
+
+WebAuthn uses public-key cryptography. When an engineer registers a hardware key (like a YubiKey) or a biometric Passkey (Apple FaceID / Windows Hello), the device generates a Private Key locked inside its hardware enclave, and sends the Public Key to your server.
+
+**Why it is un-phishable:**
+During login, your server sends a cryptographic "Challenge." The hardware key will *only* sign the challenge if the browser's origin *exactly* matches the registered domain (e.g., `https://thumbnail-maker.com`). If the engineer is tricked into visiting the hacker's fake `https://thunbnail-maker.com`, the hardware key sees the mismatch and simply refuses to respond. The phishing attack fails mathematically.
+
+---
+
+### Phase 4: Contextual Auth & Step-Up Authentication
+
+Even with great security, sessions can be hijacked (e.g., if an engineer leaves their laptop unlocked at a coffee shop).
+
+**The Use Case (The GPU Scenario):**
+An engineer is logged into the SaaS control panel with a valid JWT session. They are doing normal tasks, which is fine. Suddenly, they navigate to the Infrastructure tab and click a button to **delete a production cluster of $300,000 worth of GPUs.**
+
+We cannot simply trust the existing JWT for an action with this massive of a "blast radius." We must force the user to prove they are physically at the keyboard *right now*.
+
+#### 1. The Concept: The `acr` Claim
+
+When an Identity Provider (like Azure AD or Auth0) mints a JWT, it includes an `acr` (Authentication Context Class Reference) or `amr` (Authentication Methods References) claim. This tells your `.NET API` exactly *how* the user logged in.
+
+* `acr: "pwd"` $\rightarrow$ The user just used a password.
+* `acr: "phr"` $\rightarrow$ The user used Phishing-Resistant hardware (YubiKey).
+
+If the `.NET API` sees the request to delete GPUs only has `acr: "pwd"`, it throws a specific error telling the frontend UI: *"Stop. Step-up required."*
+
+#### 2. The Operational Flow (Mermaid Diagram)
+
+Here is the exact network flow of a Step-Up Authentication sequence.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as Engineer (Browser)
+    participant IDP as Identity Provider (Auth0/Entra)
+    participant API as .NET API (Resource Server)
+
+    Note over User, API: Engineer is logged in with standard JWT (acr: "pwd")
+    
+    User->>API: DELETE /api/infrastructure/gpu-clusters/cluster-A
+    Note over API: API inspects the JWT's `acr` claim. It requires "phr" (hardware key).
+    
+    rect rgba(255, 50, 50, 0.15)
+        API-->>User: 401 Unauthorized<br/>WWW-Authenticate: Bearer error="insufficient_user_authentication"
+        Note right of User: UI intercepts the 401.<br/>Pops up a modal: "Please tap your YubiKey."
+    end
+    
+    User->>IDP: Redirects to IdP requesting strict context (prompt=login & acr_values=phr)
+    IDP-->>User: Cryptographic Challenge
+    Note over User: Engineer physically taps YubiKey.
+    User->>IDP: Signed Challenge Response
+    
+    IDP-->>User: Issues NEW JWT (acr: "phr")
+    
+    User->>API: RETRY: DELETE /api/infrastructure/gpu-clusters/cluster-A<br/>(Header: Bearer [NEW_JWT])
+    Note over API: API inspects JWT. Sees `acr: "phr"`.
+    API-->>User: 200 OK (Cluster Deleted)
+
+```
+
+#### 3. The .NET Implementation (The Policy Engine)
+
+In C#, we handle this cleanly using ASP.NET Core Authorization Policies. We don't write `if` statements in the controller; we declare the security requirement globally.
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Define the Step-Up Authorization Policy
+builder.Services.AddAuthorization(options =>
+{
+    // Standard actions just need a valid login
+    options.AddPolicy("StandardUser", policy => policy.RequireAuthenticatedUser());
+
+    // Highly destructive actions require physical hardware presence
+    options.AddPolicy("RequireHardwareKey", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        // The JWT MUST contain the 'acr' claim with a value of 'phr' (Phishing-Resistant)
+        policy.RequireClaim("acr", "phr"); 
+    });
+});
+
+var app = builder.Build();
+
+// --- CONTROLLERS ---
+
+// Standard endpoint: Any valid token works
+[Authorize(Policy = "StandardUser")]
+[HttpGet("api/infrastructure/gpu-clusters")]
+public IActionResult GetClusters()
+{
+    return Ok(new { data = "Cluster A, Cluster B" });
+}
+
+// Destructive endpoint: Requires the stepped-up token
+[Authorize(Policy = "RequireHardwareKey")]
+[HttpDelete("api/infrastructure/gpu-clusters/{id}")]
+public IActionResult DeleteCluster(string id)
+{
+    // If the user's token only has acr: "pwd", .NET automatically blocks this
+    // execution and returns a 401/403 to the frontend.
+    
+    _infrastructureService.DestroyGpuCluster(id);
+    return Ok($"$300,000 GPU Cluster {id} has been destroyed.");
+}
+
+```
+
+**Architectural Masterpiece:** By decoupling the `acr` check into a Policy, the C# controller remains completely ignorant of how the user logged in. It simply trusts the .NET middleware to enforce the cryptographic requirements before the destructive code is ever executed.
+
+---
+
+### 🏛️ Whiteboard FAQ: Defending Authentication Architecture
+
+**Q: How do we secure highly destructive actions?**
+
+> **A:** We implement **Step-Up Authentication**. Even if the user has a valid JWT, the API checks the `acr` (Authentication Context Class Reference) claim. If the action requires a hardware key (YubiKey) and the current session only used a password, the API rejects the request and triggers a UI prompt asking the user to tap their YubiKey right now to prove physical presence.
+
+**Q: Why are 6-digit SMS or Authenticator app codes no longer enough for administrators?**
+
+> **A:** They are susceptible to Adversary-in-the-Middle (AiTM) phishing attacks. A proxy website can capture the 6-digit code in real-time and pass it to the legitimate server, bypassing the protection. WebAuthn/FIDO2 hardware keys bind the cryptographic signature to the specific domain name of the website, making them mathematically un-phishable.
+
+**Q: Won't strict Rate Limiting lock out legitimate users in an office sharing the same IP address?**
+
+> **A:** This is a common edge case known as the "NAT Gateway Problem." If an entire corporate office of 500 people shares one public IP address, a simple IP-based rate limiter might accidentally block the whole office if 5 people type their passwords wrong. To fix this, advanced rate limiters don't just partition by `RemoteIpAddress`; they partition by a combination of `IP + Username` or utilize behavioral analytics (like checking for impossible travel or bot-like header signatures).
+
+**Q: What is the difference between FIDO2, WebAuthn, and Passkeys?**
+
+> **A:** > * **FIDO2** is the overarching framework/alliance for passwordless authentication.
+> * **WebAuthn** is the specific JavaScript API that browsers use to talk to FIDO2 authenticators.
+> * **Passkeys** are essentially user-friendly FIDO2 credentials. Instead of being locked to a single piece of hardware (like a physical YubiKey), a Passkey can be securely synced across your Apple iCloud or Google account, allowing you to use FaceID on your phone to log into your laptop.
+> 
+> 
