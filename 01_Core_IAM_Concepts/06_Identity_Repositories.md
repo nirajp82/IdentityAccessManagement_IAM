@@ -166,14 +166,13 @@ For external apps like Slack, the Access Plane acts as the **IdP** (Identity Pro
 * **The Cryptographic Flow:**
 1. **The Redirection:** Alice navigates to `moneyguard.slack.com`. Slack (acting as the **Service Provider** or **SP**) recognizes the corporate domain and redirects her browser to MoneyGuard's **Access Plane** (acting as the **Identity Provider** or **IdP**).
 2. **The PRT Exchange & Challenge (Seamless SSO):** When Alice's browser lands on the Access Plane (e.g., `login.microsoftonline.com`), the IdP does not show a password prompt. Instead, it attempts a seamless login using the **Primary Refresh Token (PRT)** already on her laptop.
-* **The Security Boundary:** Browsers (via native OS integration like Edge, or the Windows Accounts extension for Chrome) enforce a strict whitelist. They will *only* interface with the operating system if the URL perfectly matches the official Access Plane. If a hacker's website asks for the token, the browser completely ignores it.
-* **The Nonce Challenge:** The IdP sends down a **Nonce** (a random, single-use cryptographic string) to prevent replay attacks.
-* **The Hardware Signature:** The browser asks the OS to look inside the device's secure hardware enclave (like the TPM chip), where the PRT is safely locked. The PRT never leaves this hardware. Instead, the OS uses the cryptographic key tied to the PRT to mathematically sign the Nonce, handing just the signature back to the browser.
-* **The Verification:** The browser passes this signed proof back to the IdP via hidden HTTP headers. The IdP verifies the signature, proving with 100% certainty that Alice is actively sitting at a trusted, unlocked corporate device.
+    * **The Security Boundary:** Browsers (via native OS integration like Edge, or the Windows Accounts extension for Chrome) enforce a strict whitelist. They will *only* interface with the operating system if the URL perfectly matches the official Access Plane. If a hacker's website asks for the token, the browser completely ignores it.
+    * **The Nonce Challenge:** The IdP sends down a **Nonce** (a random, single-use cryptographic string) to prevent replay attacks.
+    * **The Hardware Signature:** The browser asks the OS to look inside the device's secure hardware enclave (like the TPM chip), where the PRT is safely locked. The PRT never leaves this hardware. Instead, the OS uses the cryptographic key tied to the PRT to mathematically sign the Nonce, handing just the signature back to the browser.
+    * **The Verification:** The browser passes this signed proof back to the IdP via hidden HTTP headers. The IdP verifies the signature, proving with 100% certainty that Alice is actively sitting at a trusted, unlocked corporate device.
 3. **The Assertion (The Digital Voucher):** Now that Alice is authenticated, the Access Plane (**IdP**) generates a **SAML Assertion**—a secure digital voucher containing her identity details. The IdP signs this assertion with MoneyGuard's **Private Key**.
 4. **The Validation:** The browser forwards this signed voucher back to Slack (**SP**). Slack uses MoneyGuard's **Public Key** (which was securely shared between the two companies during the initial federation setup) to mathematically verify the signature.
 5. **The Result:** Slack confirms the signature is authentic. Because it trusts MoneyGuard's Access Plane, it accepts the voucher and grants Alice access to her workspaces, entirely without seeing a password.
-
 
 
 * **The Security Benefit:** Slack never sees Alice's password. Even if Slack is breached, our credentials remain safe within the Access Plane.
