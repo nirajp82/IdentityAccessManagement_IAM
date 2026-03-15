@@ -158,6 +158,7 @@ sequenceDiagram
     end
 
 ```
+
 #### 2. Federated SaaS Apps (Slack)
 
 For external apps like Slack, the Access Plane acts as the **IdP** (Identity Provider) and Slack acts as the **SP** (Service Provider). Slack doesn't store Alice's password; it trusts *MoneyGuard's* signature.
