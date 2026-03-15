@@ -46,6 +46,76 @@ This is the "Advanced MFA" we talked about. When you use a hardware key or FaceI
 
 To defeat these, we must upgrade our architecture at the network edge and at the identity layer.
 
+### 1. The Registration: "The Digital Marriage"
+
+When you first set up your YubiKey or FaceID for the **Thumbnail Maker**, a unique pair of keys is created:
+
+* **The Private Key:** Stays locked inside the secure hardware chip of your key or phone. It never leaves.
+* **The Public Key:** Sent to the Thumbnail Maker’s server and stored in your user profile.
+
+**The Secret Sauce:** During this setup, the browser sends the **Relying Party ID (RP ID)**—which is the domain `thumbnail-maker.com`—to the hardware key. The key saves this domain inside its secure storage, essentially "marrying" that credential to that specific URL.
+
+---
+
+### 2. The Attack: "The Imposter at the Gate"
+
+Now, let's look at the hacker's Shadow Proxy (AiTM) attack:
+
+1. **The Redirect:** The hacker tricks you into visiting `thunbnail-maker.com` (with an extra **'n'**).
+2. **The Challenge:** The hacker’s proxy server reaches out to the real site, grabs the login "Challenge" (a random string of data), and passes it to your browser.
+3. **The Browser's Honesty:** Your browser is built to be honest. Before it talks to your YubiKey or FaceID, it looks at the URL bar. It sees you are at `thunbnail-maker.com`.
+4. **The Handshake Request:** The browser sends the challenge to your hardware key and says: *"Hey, I need a signature for the domain `thunbnail-maker.com`."*
+
+---
+
+### 3. The Refusal: "Origin Mismatch"
+
+This is the moment the attack fails. Your hardware key looks at the request:
+
+* **Key's Internal Memory:** "I have a credential for `thumbnail-maker.com`."
+* **Browser's Current Request:** "I need a signature for `thunbnail-maker.com`."
+
+The hardware key sees that the domain is **not an exact match**. It doesn't matter if the hacker’s site looks 100% identical. Because the domains are different, the hardware key **refuses to sign the challenge**.
+
+---
+
+### 4. Why the Hacker is Powerless
+
+Because the hardware key refuses to sign, the browser never receives the "Signed Assertion."
+
+* In a **TOTP (6-digit code)** attack, the user *provides* the code, which the hacker then *replays*.
+* In a **WebAuthn** attack, the user *cannot* provide the signature because the hardware (which holds the private key) won't generate it for the wrong domain.
+
+The hacker’s server is left waiting for a signature that never comes. They have your password (captured earlier), but without that hardware-signed cryptographic proof, the real Thumbnail Maker API will never issue a session cookie.
+
+---
+
+### 🏛️ Whiteboard FAQ: The Cryptography of Trust
+
+**Q: Can a hacker "spoof" the domain name so the browser thinks it's on the real site?**
+
+> **A:** No. The browser determines the domain from the **TLS certificate** and the actual URL it is connected to. As long as the user's browser isn't completely compromised (malware), it will always report the true domain to the hardware key.
+
+**Q: What if the hacker uses a sub-domain, like `thumbnail-maker.hacker.com`?**
+
+> **A:** Still fails. WebAuthn requires a match on the "Effective Top-Level Domain + 1" (eTLD+1). `hacker.com` is not `thumbnail-maker.com`.
+
+**Q: Is this the same as "Passkeys"?**
+
+> **A:** Yes. "Passkeys" is the consumer-friendly name for this technology. Whether you use a YubiKey, an iPhone (FaceID), or an Android phone (Fingerprint), the underlying **WebAuthn** protocol works exactly the same way to prevent phishing.
+
+---
+
+### 📝 Summary of Defense
+
+| Feature | 6-Digit Code (TOTP) | Hardware Key (WebAuthn) |
+| --- | --- | --- |
+| **Phishable?** | **Yes.** Easily proxied. | **No.** Mathematically impossible to proxy. |
+| **Origin Bound?** | **No.** Works on any site. | **Yes.** Locked to a specific domain. |
+| **Relay Protection?** | **None.** | **Signature Nonce.** (Cannot be replayed). |
+
+
+
 ---
 
 ### Phase 2: Stopping the Bots (Rate Limiting)
