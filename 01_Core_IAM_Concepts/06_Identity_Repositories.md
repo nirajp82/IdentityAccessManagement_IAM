@@ -192,15 +192,18 @@ Engineers use **Identity Federation** to strictly avoid the massive security ris
 
 #### 4. Modern Microservices (.NET Core / Node.js)
 
-This is for **App-to-App** or **User-to-App** security using **OIDC (OpenID Connect)**.
+For custom-built internal applications (like a frontend web portal communicating with backend APIs), modern architectures move away from SAML and instead use **OpenID Connect (OIDC)** and **OAuth 2.0**. This relies on lightweight, self-contained credentials called JSON Web Tokens (JWTs).
 
-* **The Technical Flow:** Alice’s frontend dashboard (Node.js) needs to pull her account balance from a restricted backend API (.NET).
-1. The Node.js app asks the Access Plane (**IdP**) for a **JWT (JSON Web Token)**.
-2. The Access Plane issues a token containing Alice’s **UUID** and specific "Scopes" (e.g., `read:balance`).
-3. The .NET API receives the token and validates the **Digital Signature** of the Access Plane.
+**The Cryptographic Flow & Stateless Validation:**
 
+1. **The Initiation & Redirection:** Alice navigates to her internal dashboard (e.g., a Node.js or React frontend). The frontend detects she lacks an active session and redirects her browser to the **Access Plane / IdP**.
+2. **The Authentication & Scope Assignment:** Just like the previous flows, the Access Plane securely authenticates Alice (leveraging her laptop's PRT for a seamless experience). The IdP then checks what this specific Node.js application is allowed to ask for, and generates a **JWT Access Token**. This token includes her unique identity (UUID) and explicit permissions called "Scopes" (e.g., `"scp": ["read:balance", "view:profile"]`).
+3. **The Cryptographic Signature:** Before handing the token back to the frontend, the Access Plane mathematically signs the JWT using its **Private Key**.
+4. **The API Request:** The Node.js frontend receives the JWT and safely stores it. When the dashboard needs to pull Alice's account data, it makes an HTTP request to the restricted backend API (e.g., built in .NET Core), attaching the JWT inside the `Authorization: Bearer` header.
+5. **Stateless Validation (The Local Math Check):** The .NET API intercepts the request. *Crucially, it does not need to pause and make a network call back to the Access Plane to ask if the token is valid.* Instead, the .NET API periodically downloads the Access Plane's **Public Keys** (hosted at a standard, public URL called the JWKS - JSON Web Key Set) and caches them in its local memory.
+6. **The Result:** The .NET API uses the cached Public Key to independently verify the cryptographic signature on the JWT in a fraction of a millisecond. Because the signature matches, the token hasn't expired, and the `"read:balance"` scope is present, the API trusts the mathematical proof and returns the data.
 
-* **The Experience:** The API never handles Alice's password; it only trusts the **Access Plane's mathematical proof**.
+**The Experience:** The backend API remains completely isolated from the complexities of passwords, MFA, or PRT challenges. It strictly enforces security based on mathematical trust, while the Access Plane is shielded from being overwhelmed by millions of internal API requests.
 
 ---
 
