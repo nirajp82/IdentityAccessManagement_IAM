@@ -943,13 +943,13 @@ When presenting this architecture to stakeholders or security teams, here is how
 > 
 >
 
-Phase 10: Audit Logging
+### Phase 10: Audit Logging
 
 To complete your security architecture, we need to implement **Audit Logging**. In a high-scale PBAC (Policy-Based Access Control) system, the API doesn't just need to know if access is allowed; it must be able to **prove** it later during a SOC2 or HIPAA audit.
 
 An audit log is a permanent, immutable record of every decision made by the Policy Engine.
 
-### 🏛️ The Audit Use Case: "Who Viewed the EU Folder?"
+### The Audit Use Case: "Who Viewed the EU Folder?"
 
 **The Scenario:** Six months from now, a compliance officer asks: *"On March 14th, did Alice have permission to view the `Generated_Thumbnail_eu` folder, and why was she allowed?"*
 
@@ -1049,5 +1049,3 @@ public async Task<bool> IsAuthorizedAsync(string userId, string action, string r
 | **Audit (Proof)** | The "Witness." Records the event. | Redis / Elasticsearch |
 
 **This concludes our journey through the Advanced Policy Engine architecture!** You now have a system that is decoupled, graph-based, real-time revocable, and fully auditable.
-
-x
