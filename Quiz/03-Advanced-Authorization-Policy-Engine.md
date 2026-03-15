@@ -549,6 +549,7 @@ This demonstrates the **Zero Trust** nature of Zanzibar: Unless a specific relat
 
 ##### how to handle a **"Hard Revocation"** for Alice? 
 In Zanzibar, this is as simple as deleting the Tuple, which instantly causes the next `CheckPermission` call to return `False` globally.
+
 ---
 
 ##### 7️⃣ How the Permission Logic Queries the Rows
