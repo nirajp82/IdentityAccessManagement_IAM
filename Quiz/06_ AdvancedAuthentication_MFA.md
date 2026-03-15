@@ -76,23 +76,6 @@ To understand how the hacker is defeated, we have to look at the two distinct li
 When the engineer first sets up their YubiKey, the server sends a *Registration Challenge*. The YubiKey generates a brand new Private/Public key pair, signs the challenge, and permanently binds itself to the real domain (`thumbnail-maker.com`). The Public Key is sent to the database.
 
 **Phase B: The Login & The Imposter at the Gate**
-When the user returns to log in, the server generates an *Authentication Challenge*. Let's look at how this stops the hacker's Shadow Proxy (AiTM) attack in real-time:
-
-* **The Redirect & Challenge:** The hacker tricks you into visiting `thunbnail-maker.com` (the typo domain). The proxy server grabs the login "Challenge" (the random string) from the real site and passes it to your browser.
-* **The Browser's Honesty:** Your browser sees you are at `thunbnail-maker.com` and asks your hardware key for a signature for *that specific domain*.
-* **The Origin Mismatch:** Your hardware key compares the browser's request (`thunbnail-maker.com`) against its internal memory (`thumbnail-maker.com`, which it saved during Setup). Because the domains are not an exact match, it **refuses to sign the challenge**.
-* **The Hacker is Powerless:** Without that hardware-signed cryptographic proof, the real API will never issue a session cookie. The hacker is left waiting for a signature that never comes.
-
----
-
-### 2. The Lifecycle & The Attack: From Setup to Login
-
-To understand how the hacker is defeated, we have to look at the two distinct lifecycles of WebAuthn: **Registration (Setup)** and **Authentication (Login)**. In *both* phases, the server generates a unique cryptographic "Challenge" to ensure the request is fresh and cannot be replayed by an attacker.
-
-**Phase A: The Setup (Registration)**
-When the engineer first sets up their YubiKey, the server sends a *Registration Challenge*. The YubiKey generates a brand new Private/Public key pair, signs the challenge, and permanently binds itself to the real domain (`thumbnail-maker.com`). The Public Key is sent to the database.
-
-**Phase B: The Login & The Imposter at the Gate**
 When the user returns to log in, the server generates an *Authentication Challenge*. Let's look at how this stops the hacker's Shadow Proxy (AiTM) attack in real-time.
 
 #### The AiTM Phishing Sequence
