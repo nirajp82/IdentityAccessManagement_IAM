@@ -69,8 +69,6 @@ What makes this a "marriage" rather than just a digital handshake is the **Relyi
 
 ---
 
----
-
 ### 2. The Attack: "The Imposter at the Gate"
 
 Now, let's look at the hacker's Shadow Proxy (AiTM) attack:
