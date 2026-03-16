@@ -153,7 +153,7 @@ These permissions are stored in **your database** (e.g., in a `Users`, `Photos`,
 
 ### Tokens
 
-* **Access Token:** The “Valet Key.” A credential used by the Client application to securely access the Resource Server.
+* **Access Token:** It a temporary security credential used to authenticate a user or application and authorize access to specific resources and APIs. The “Valet Key.” A credential used by the Client application to securely access the Resource Server.
    * **Purpose (Authorization, Not Authentication):** Represents *delegated authorization*. It communicates exactly *what* the client is allowed to do, but it is **not** intended to prove *who* the user is.
    * **Format Agnostic:** OAuth 2.0 does not define the structure of an Access Token. It may be an opaque string or a structured JSON Web Token (JWT).
    * **The Identity Trap (Architectural Warning):** In modern enterprise systems, Access Tokens are commonly JWTs and include a subject identifier (`sub`). However, **Resource Servers must treat Access Tokens strictly as authorization artifacts and must never use them as proof of user authentication.**
