@@ -583,7 +583,7 @@ DPoP binds the token cryptographically to the user's specific browser tab. It tu
 3. **The Proof:** Every time React makes an API request, it uses the hidden Private Key to sign a temporary "Proof" (a tiny JWT containing the URL and HTTP method).
 4. **The Check:** The .NET API verifies that the signature on the Proof matches the Public Key stamped inside the token.
 
-The API doesn't just trust the Access Token because it's signed by the Auth Server; it checks if the person holding the token is the "rightful owner" by following these steps:
+	The API doesn't just trust the Access Token because it's signed by the Auth Server; it checks if the person holding the token is the "rightful owner" by following these steps:
 
 	- **Extract the "Expected" Key:** The Access Token contains a special field (usually called `cnf` for "confirmation"). Inside this field is the **Public Key** (or its thumbprint) that you generated in React back in Step 1. The API simply reads this thumbprint out of the token.
 
