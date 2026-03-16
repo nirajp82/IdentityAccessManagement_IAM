@@ -784,12 +784,55 @@ The `nonce` ensures that the ID Token was generated specifically for the login a
 * **The Match:** If the `nonce` inside the token exactly matches the `nonce` in the cookie, the backend knows: *"This token was minted just seconds ago for this specific user's login request."*
 * **The Replay Failure:** If a hacker tries to replay a stolen token from yesterday, the `nonce` inside that old token will not match the new, random `nonce` cookie the backend generated for the current request. The backend rejects the token.
 ---
-| Parameter | The Secret String | Where it is Stored | How it is Transferred | The Validation (The "Glue") |
-| --- | --- | --- | --- | --- |
-| **`State`** | `State_A1` (Random String) | **Browser Cookie** (Secure & HttpOnly) | **Front-Channel:** Sent to Auth0 in the URL; Auth0 sends it back in the Callback URL. | **The Cross-Check:** The BFF compares the `state` in the **Incoming URL** against the `state` in the **Automatic Cookie**. If they match, the session is legitimate. |
-| **`PKCE`** | `Raw_PKCE_Verifier` (The "PIN") | **BFF Memory** (Never leaves the server) | **The Hash Shift:** BFF hashes the PIN to create a `PKCE_Challenge_Hash`. The **Browser** carries this Hash to Auth0. | **The Math Proof:** At the end, the BFF sends the **Raw PIN** to Auth0 via a Private Back-Channel. Auth0 hashes it; if it matches the original Hash, the "Caller" is verified. |
-| **`Nonce`** | `Nonce_B2` (Random String) | **Browser Cookie** (Secure & HttpOnly) | **The Injection:** Sent to Auth0 in the URL. Auth0 physically **bakes** this string into the ID Token (JWT) payload. | **The Freshness Seal:** The BFF cracks open the ID Token and reads the `nonce` claim. It must match the `Nonce_B2` in the **Current Cookie**. If it matches, the token isn't a "replay" of an old one. |
 
+### Act 1: The Request (Leaving the App)
+
+*The BFF prepares the "security luggage" before sending the user to Auth0.*
+
+* **State:** The BFF puts a sticker on the user's browser (Cookie) and sends the same ID to Auth0 in the URL.
+* **PKCE:** The BFF hides the **Secret PIN** (Verifier) in its own memory. It only gives the user a **Hash** (Challenge) to show to Auth0.
+* **Nonce:** The BFF puts a unique "Timestamp/ID" in a browser cookie and tells Auth0: "Hey, put this inside the ID Token you’re about to make."
+
+### Act 2: The Return (Coming back from Auth0)
+
+*The user returns with a "Voucher" (The Authorization Code) and the baggage.*
+
+* **State Check (BFF Validates):** Before doing anything, the BFF looks at the URL. Does the `state` in the URL match the `state` in the Cookie?
+* *If no:* A hacker likely forced this redirect. **STOP.**
+* *If yes:* The request is legitimate.
+
+
+
+### Act 3: The Exchange (The Private Back-Channel)
+
+*The BFF talks to Auth0 privately to swap the "Voucher" for real Tokens.*
+
+* **PKCE Check (Auth0 Validates):** The BFF sends the **Secret PIN** (Raw Verifier). Auth0 hashes it. If the result matches the **Hash** it received in Act 1, it knows the "Voucher" wasn't stolen mid-flight.
+* *If yes:* Auth0 releases the **ID Token** and **Access Token**.
+
+
+
+### Act 4: The Final Inspection (Opening the Prize)
+
+*The BFF receives the ID Token.*
+
+* **Nonce Check (BFF Validates):** The BFF "cracks open" the ID Token (JWT). It looks for the `nonce` field inside. It compares it to the `Nonce` Cookie it saved in Act 1.
+* *If yes:* The BFF knows this isn't a "replay" of an old token from 10 minutes ago. It's fresh.
+
+
+### The OIDC Security Handshake Flow
+
+| Phase | Parameter | Where is the "Secret" born & stored? | How is it moved? | Who performs the validation? | **What does it protect?** |
+| --- | --- | --- | --- | --- | --- |
+| **1. The Outbound Request** | **State** | **BFF:** Generated and stored in a **Secure Cookie**. | **Front-Channel:** Sent to Auth0 in the URL; Auth0 simply "mirrors" it back. | **BFF:** Compares the `state` in the returning URL against the Cookie. | **The Request Integrity:** Prevents **CSRF**. Ensures the login response belongs to a request *you* actually started. |
+| **2. The Token Exchange** | **PKCE** | **BFF:** The `Verifier` (PIN) stays in **BFF Memory**. Only a `Hash` is sent out. | **Back-Channel:** After the user returns, the BFF sends the `Raw PIN` directly to Auth0 (Server-to-Server). | **Auth0:** Hashes the PIN and checks if it matches the `Hash` it received earlier. | **The Authorization Code:** Prevents **Injection/Interception**. Ensures a hacker can't "redeem" a stolen code for tokens. |
+| **3. The Token Receipt** | **Nonce** | **BFF:** Generated and stored in a **Secure Cookie**. | **The Injection:** Sent to Auth0, which **"bakes"** it permanently into the ID Token (JWT). | **BFF:** Cracks open the ID Token and checks if the `nonce` inside matches the Cookie. | **The ID Token:** Prevents **Replay Attacks**. Ensures a hacker isn't "re-using" a valid token they captured earlier. |
+
+
+### Why the "Who Validates" matters:
+
+1. **BFF Validates State & Nonce:** The BFF is protecting itself. It refuses to log the user in if the "Return Address" (State) is wrong or if the "Passport" (ID Token/Nonce) is an old photocopy.
+2. **Auth0 Validates PKCE:** Auth0 is protecting the "Keys to the Kingdom." It refuses to hand over the Access Token unless the person asking for it can prove they are the same person who started the flow by providing the original "PIN" (the Verifier).
 
 ---
 
