@@ -337,12 +337,97 @@ React calls the .NET API with your internal token. The API checks its database: 
 
 ### Scenario B: The Internal Application (Admin Portal)
 
-If Bob (an employee) logs into an internal `Admin Portal` using an internal Auth Server, the flow is identical. However:
+In an internal "Admin Portal" scenario, the flow is nearly identical to the external one, but the **Context** and **Roles** change. Instead of Google, you use an internal **Identity Provider (IdP)** like Okta or Azure AD. Instead of Alice asking for her own photos, the **FinancialAnalyst** is asking for protected corporate resources.
 
-1. **First-Party Trust (Skipping Consent):** Because the Admin Portal is a first-party app, the internal Auth Server skips the Consent Screen. It assumes Bob naturally consents.
-2. **Elevated Scopes:** It requests scopes like `photos:delete:all`.
-3. **The BFF Pattern:** The token is hidden in a secure proxy to protect it from browser hackers.
+### Phase 0: The Prerequisite Setup (Enterprise Registration)
 
+* **The Introduction:** You register "Admin Portal" in your company's **Azure AD / Okta Tenant**.
+* **The Scopes:** You define internal permissions, e.g., `customers:read` or `reports:download`.
+* **The ID Badge:** `client_id=admin_portal_prod_01`.
+
+
+### Scenario B: The Internal Application (Admin Portal)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Analyst as FinancialAnalyst (Browser)
+    participant Portal as Admin Portal (React + .NET)
+    participant IAM as Company IAM (Okta/Azure AD)
+    participant API as Customer Service API
+
+    Note over Analyst,IAM: Phase 1: Authentication & Authorization
+    Analyst->>Portal: 1. Clicks "Access Customer List"
+    Portal->>Portal: Generates PKCE Verifier & Challenge
+    Portal->>Analyst: Redirects to IAM Login
+    Analyst->>IAM: 2. GET /authorize?scope=customers:read&code_challenge=...
+    IAM-->>Analyst: Prompts for Corporate Credentials (SSO)
+    Analyst->>IAM: 3. Performs MFA / Login
+    IAM->>Analyst: 4. Redirects with Auth Code (code=ABC_456)
+    
+    Note over Portal,IAM: Phase 2: The Back-Channel Exchange
+    Analyst->>Portal: 5. Sends Auth Code to Backend
+    Portal->>IAM: 6. POST /token (Code + Client Secret + PKCE Verifier)
+    IAM->>IAM: Validates Secret & PKCE Match
+    IAM-->>Portal: 7. Returns Access Token (JWT)
+    
+    Note over Portal,API: Phase 3: Resource Access (The Goal)
+    Portal->>API: 8. GET /v1/customers (Header: Bearer <Access Token>)
+    API->>API: Validates JWT signature & "FinancialAnalyst" role
+    API-->>Portal: 9. Returns Customer List Data
+    Portal-->>Analyst: 10. Displays Customer Table
+
+```
+
+### Step-by-Step Breakdown
+
+#### Step 1 & 2: The Request for Corporate Access
+
+The Analyst clicks "Login". The app redirects to the internal IdP.
+
+```http
+GET /authorize?
+  client_id=admin_portal_prod_01
+  &response_type=code
+  &scope=openid profile customers:read
+  &code_challenge=H6K9...
+
+```
+
+#### Step 3: No Consent Screen?
+
+In internal apps, administrators often **"Pre-Authorize"** the app. Alice might not see a "Do you allow this?" screen because the company has already decided that anyone with the "Finance" role *should* have access.
+
+#### Step 5 & 6: The Secure Exchange
+
+The .NET backend exchanges the code. Crucially, the **Client Secret** stays on the server, ensuring that only the official "Admin Portal" can get the token.
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic [Base64(client_id:client_secret)]
+
+grant_type=authorization_code
+&code=ABC_456
+&code_verifier=raw_secret_here
+
+```
+
+#### Step 8 & 9: Internal API Authorization (The "Meat")
+
+The Access Token is now used as a **Passport**. When the API receives it, it checks the **Claims**:
+
+* **Is it expired?** (exp)
+* **Is the user in the Finance Department?** (department: "Finance")
+* **Does the token have the right scope?** (scp: "customers:read")
+
+If all check out, the Customer List is released.
+
+
+### The Key Difference
+
+In the **External** flow, the purpose is usually to **Identify** the user (Who are you?).
+In the **Internal** flow, the purpose is **Entitlement** (What are you allowed to do based on your job title?).
 ---
 
 ## 9. Deep Dive FAQs: PKCE & Interception
