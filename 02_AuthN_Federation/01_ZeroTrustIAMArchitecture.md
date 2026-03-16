@@ -714,16 +714,6 @@ For human users (e.g., a MoneyGuard Database Admin needing to run a migration), 
 5. **Access:** The Admin presents this token to the Database Gateway. The Gateway sees the valid "DB Admin" role and the timestamp, and lets them in.
 6. **Automatic Revocation:** After 2 hours, the JWT organically expires. The PAM broker automatically strips the role from the Identity Store. If the admin tries to make another API call, the PEP gateway rejects the expired token. No manual cleanup is required.
 
-### B. JIT Access for Machine Identities (M2M / Dynamic Policies)
-
-Machine identities (like an automated nightly backup script) cannot click "approve" or pass MFA. Therefore, JIT access relies on dynamic policy updates at the Policy Decision Point (PDP), rather than issuing new tokens.
-
-1. **Zero Privileges by Default:** The backup workload boots up. It requests a baseline standard token (or SPIFFE SVID) from the IAM Control Plane. By default, the Open Policy Agent (PDP) rules deny this workload access to the `Core Ledger Service`.
-2. **The Request:** The workload orchestration engine (e.g., a Kubernetes CronJob controller) signals the IAM Control Plane that a scheduled backup window is starting.
-3. **Dynamic Policy Injection (Approval):** Instead of changing the workload's identity token, the central IAM Control Plane dynamically injects a temporary rule into the local Open Policy Agent (PDP) running next to the Ledger Service. 
-4. **Enforcement:** The backup workload makes its API call. The PEP intercepts it and asks the PDP. The newly injected Rego policy states: *"Allow the `backup-script` identity to read the ledger, but ONLY between 2:00 AM and 3:00 AM."*
-5. **Automatic Revocation:** At 3:01 AM, the dynamic rule times out in the PDP. The workload's access is instantly severed, even if its underlying token is still mathematically valid.
-
 ### JIT Access Architecture Flow (Human Example)
 
 ```mermaid
@@ -758,3 +748,46 @@ sequenceDiagram
     Admin->>PEP: Execute DB Migration + Elevated JWT
     PEP-->>Admin: 401 Unauthorized (Token Expired)
 ```
+
+### B. JIT Access for Machine Identities (M2M / Dynamic Policies)
+
+In the Human (Part A) scenario, the Admin gets a special "High-Clearance License" for two hours. In this Machine (Part B) scenario, the script keeps its standard ID card, but the guard at the gate is handed a temporary memo that says: *"For the next hour only, let anyone with a 'Backup-Script' ID pass through."* Once that hour is up, the guard shreds the memo and goes back to the old rulebook where that ID is blocked—even if the script’s ID card is still valid.
+
+### Updated JIT Flow for Machine Identities
+
+1. **Zero Privileges by Default:** The backup workload (Machine) boots up with a basic ID token. If it tries to access the Ledger, the **Policy Decision Point (PDP)** looks at its permanent rulebook and says "No."
+2. **The Request:** A "Manager" service (like Kubernetes) tells the IAM system that it's time for the scheduled backup.
+3. **Dynamic Policy Injection (The "Law" Change):** The IAM system sends a temporary "Rego" policy—a snippet of code—directly to the PDP's active memory. This effectively updates the local laws on the fly.
+4. **Enforcement:** The workload tries the same API call. This time, the PDP sees the temporary "Law" and grants access.
+5. **Automatic Revocation:** At 3:01 AM, the temporary rule expires and disappears from the PDP’s memory. The "Law" reverts to its original state, and access is instantly cut off.
+
+```mermaid
+sequenceDiagram
+    participant W as Backup Workload (Machine)
+    participant K as K8s / Orchestrator
+    participant IAM as IAM Control Plane
+    participant PDP as PDP (The "Guard")
+    participant DB as Ledger Service
+
+    Note over PDP: Rulebook: "Deny Backup-Script"
+    
+    W->>PDP: 01:50 AM - Request Access
+    PDP-->>W: 403 Forbidden (Law says No)
+
+    Note over K, IAM: 02:00 AM - Backup Window Triggered
+    K->>IAM: Start Backup Window
+    IAM->>PDP: Inject Temp Law: "Allow Backup-Script until 03:00"
+    
+    W->>PDP: 02:05 AM - Request Access
+    Note right of PDP: Checks Temp Law: ALLOWED
+    PDP->>DB: Access Granted
+    
+    Note over PDP: 03:01 AM - Temp Law Expires/Self-Shreds
+    
+    W->>PDP: 03:05 AM - Request Access
+    Note right of PDP: Back to Default Rule: DENIED
+    PDP-->>W: 403 Forbidden
+
+```
+
+---
