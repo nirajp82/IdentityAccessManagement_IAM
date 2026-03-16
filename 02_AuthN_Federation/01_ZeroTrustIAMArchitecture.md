@@ -710,7 +710,9 @@ For human users (e.g., a MoneyGuard Database Admin needing to run a migration), 
 2. **The Request:** The admin navigates to the Privileged Access Management (PAM) portal and requests the `db_admin_prod` role, linking a valid Jira/ServiceNow ticket for the migration.
 3. **Approval & Step-Up Auth:** A manager approves the request. The PAM broker temporarily adds the admin to the elevated group in the Identity Store. The portal immediately forces the admin's browser to perform a **Step-Up Authentication** via OIDC (prompting for a YubiKey MFA tap).
 4. **Time-Bound Token Issuance:** The IAM Control Plane issues a *new* JWT. This token contains the elevated `"role": "db_admin_prod"` claim, but it is issued with a strict, aggressively short expiration time (`exp` set to exactly 2 hours).
-5. **Automatic Revocation:** After 2 hours, the JWT organically expires. The PAM broker automatically strips the role from the Identity Store. If the admin tries to make another API call, the PEP gateway rejects the expired token. No manual cleanup is required.
+   * The Golden Ticket (JWT): The system issues a new JSON Web Token (JWT). This is a digital pass that says: "This is the Admin, they have DB rights, but this pass self-destructs in 2 hours."
+5. **Access:** The Admin presents this token to the Database Gateway. The Gateway sees the valid "DB Admin" role and the timestamp, and lets them in.
+6. **Automatic Revocation:** After 2 hours, the JWT organically expires. The PAM broker automatically strips the role from the Identity Store. If the admin tries to make another API call, the PEP gateway rejects the expired token. No manual cleanup is required.
 
 ### B. JIT Access for Machine Identities (M2M / Dynamic Policies)
 
