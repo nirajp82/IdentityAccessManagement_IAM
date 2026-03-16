@@ -78,8 +78,8 @@ The front door. The IdP handles **Authentication (AuthN)**—proving *who* is lo
 
 * **OIDC / OAuth2 / SAML:** MoneyGuard uses OIDC for modern web/mobile logins and SAML for legacy banking software.
 * **MFA (Multi-Factor Authentication):** For a bank, this is mandatory. The IdP enforces a second factor, such as an SMS code for consumers or a hardware YubiKey for MoneyGuard database administrators.
-* **Federation:** Establishes trust relationships to allow large corporate clients to log into MoneyGuard's corporate portal using their own company's credentials (e.g., via Azure AD).
-
+* **Federation:** Allows large corporate clients to securely access MoneyGuard's portal using their existing client's company logins (e.g., Azure AD). By establishing this trust relationship, MoneyGuard outsources user verification and password management directly to the client's own IT system. This means MoneyGuard won't manage client usernames and passwords; they are managed entirely by the client.
+  
 ### Module 3: [ IAM Control Plane ]
 
 The brain. Once the IdP authenticates the user, the IAM Control Plane takes over to handle **Authorization (AuthZ)**—determining what the user is allowed to do and giving them the cryptographic "ticket" (token) to do it.
