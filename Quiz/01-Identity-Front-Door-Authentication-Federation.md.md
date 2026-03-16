@@ -540,6 +540,14 @@ The nurse's browser instantly and invisibly submits this form via **HTTP POST** 
 **Phase 5: The Verification (Step 7)**
 Workday receives the massive XML POST. Before trusting it, Workday grabs Microsoft Entra ID's **Public Key** (which it saved during initial setup) and runs the math against the XML signature.
 If the math is perfect, Workday knows the XML was genuinely issued by Entra ID and hasn't been tampered with by a hacker. Workday reads the employee ID from the XML and logs the nurse into her portal.
+   - **The "Clear" Text:** The SP reads the plain XML data (e.g., `User: John`).
+   - **The Signature:** The SP looks at the digital signature at the bottom.
+   - **The Math:** The SP uses the **Public Key** to "unlock" the signature. This doesn't reveal hidden text; it reveals a **Hash Value** that the IdP (Entra ID) calculated before sending.
+   - **The Comparison:** The SP calculates its own hash of the XML data it received and read in step 1.
+   - **The Verdict:** If the SP's hash matches the hash it "unlocked" from the signature, the SP knows:
+   - **Authenticity:** Only the holder of the Private Key (the IdP) could have created that signature.
+   - **Integrity:** Not a single "space" or "letter" in the XML has changed since it was signed.
+
 
 ### Why is this considered "Legacy but Bulletproof"?
 
