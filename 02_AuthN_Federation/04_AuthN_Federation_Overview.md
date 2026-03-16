@@ -1,5 +1,12 @@
 ## Authentication & Federation in Zero-Trust IAM
 
+### What is Zero-Trust Architecture (ZTA)
+
+Zero-Trust Architecture (ZTA) is a security model based on one simple, slightly cynical rule: "Never trust, always verify."
+
+In a traditional setup (the "Castle and Moat" model), once you were inside the company network (the castle), you were trusted by default. In Zero-Trust, there is no "inside." Every single request to access a file, database, or application—whether it’s coming from the CEO sitting in the office or a hacker in another country—is treated as a potential threat until proven otherwise.
+
+
 ### 1. Where It Fits in the Zero-Trust Architecture
 
 A common point of confusion is drawing the line between the **Identity Provider (IdP)** and the **IAM Control Plane (Authorization Server)**.
