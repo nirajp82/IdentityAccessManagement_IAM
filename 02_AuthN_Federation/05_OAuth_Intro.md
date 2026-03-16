@@ -164,8 +164,8 @@ These permissions are stored in **your database** (e.g., in a `Users`, `Photos`,
 
 ### Scopes and Claims
 
-* **Scopes:** Defined at the OAuth 2.0 level. They represent the *permissions* the client is requesting (e.g., `email`).
-* **Claims:** Key-value pairs inside a token asserting facts (e.g., `sub` for user ID).
+* **Scopes:** Defined at the OAuth 2.0 level. They represent the *permissions* the client is requesting (e.g., `photos.upload, openid, contacts.readonly`).
+* **Claims:** Key-value pairs inside a token asserting facts (e.g., `sub, email, given_name, iat, exp` for user ID).
 
 ### JWT Structure and Validation (The Local Math)
 
