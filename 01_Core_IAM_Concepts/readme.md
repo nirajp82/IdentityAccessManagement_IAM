@@ -1,151 +1,82 @@
-# 📘 Chapter 1: Core IAM Concepts & Architecture
+# Module 01: Core IAM Concepts
 
-**Focus:** Understanding the foundations of Identity and Access Management (IAM). We go beyond “login pages” to see how IAM protects the enterprise in a distributed environment.
+This module builds the foundation everything else in the repo stands on. It answers the basic questions — what IAM actually is, how authentication differs from authorization, how access is modelled, and where identities are stored — before moving into protocols and system design.
 
-> **Scenario Context:** In this chapter, we use **"MoneyGuard"**, a fictional global bank, to show how IAM works in a real-world environment with both on-premise and cloud systems.
+Every chapter is taught through **MoneyGuard Bank**: Priya joining as a teller, Raj administering access, Dana auditing it, Alex building against it, Sam contracting under it, and Eve trying to break it. Read [`../SCENARIO.md`](../SCENARIO.md) first if you haven't met the cast.
 
----
+By the end you should be able to sketch a bank's identity architecture on a whiteboard and defend each decision.
 
-## 📂 Topic Index
+## 📂 Chapters
 
-### [01_Intro.md](./01_Intro.md) | What is IAM?
+| # | Chapter | What It Covers |
+|---|---------|----------------|
+| 1 | [What Is IAM?](./01_What_Is_IAM.md) | The definition, why identity replaced the firewall as the perimeter, IAM vs PAM, human vs non-human identity |
+| 2 | [The AAA Framework](./02_AAA_Framework.md) | Authentication, Authorization, and Accounting — three distinct decisions, three different clocks, 401 vs 403 |
+| 3 | [Access Control Models Overview](./03_Access_Control_Models_Overview.md) | RBAC, ABAC, and PBAC introduced and compared, role explosion, what belongs in a token |
+| 4 | [Principle of Least Privilege](./04_Principle_Of_Least_Privilege.md) | Blast radius, standing vs Just-In-Time access, privilege creep, Segregation of Duties |
+| 5 | [The IAM Lifecycle — Joiner, Mover, Leaver](./05_IAM_Lifecycle_JML.md) | The canonical JML chapter: HR-driven provisioning, the dangerous Mover event, the offboarding kill switch, reconciliation |
+| 6 | [Identity Repositories](./06_Identity_Repositories.md) | Active Directory, LDAP, cloud directories, hybrid identity, the hierarchy of truth, split-brain identity, IGA vs SIEM |
+| 7 | [Service Accounts & Non-Human Identity](./07_Service_Accounts_And_NonHuman_Identity.md) | Machine identities, why they are a top breach vector, workload identity, secret management |
 
-* **Concept:** IAM is the **new security perimeter**. Instead of just securing networks, we secure *who* can access what.
-* **Key Takeaway:** Identity is the control plane. Firewalls alone aren’t enough in a cloud/remote world.
-* **Enterprise Shift:** From siloed identities (separate accounts per app) to **centralized identity management**.
+Chapters 3 and 7 are intentionally introductory — they hand off to Module 03 (Authorization & Policy Engines) and Module 06 (Machine Identity & Workload Auth) for the deep dives.
 
-### [02_AAA_Framework.md](./02_AAA_Framework.md) | The Holy Trinity of Security
+## 🧠 Chapter 1 Capstone: MoneyGuard's Identity Architecture
 
-* **Authentication (AuthN):** *Who are you?* — Verifying the user’s identity.
-* **Authorization (AuthZ):** *What can you do?* — Checking permissions or scopes.
-* **Accounting (Auditing):** *What did you do?* — Tracking actions for compliance.
-* **Critical Distinction:** AuthN issues the token; AuthZ decides what the token allows.
+After this module, MoneyGuard's high-level design looks like this:
 
-### [03_AccessControlModels.md](./03_AccessControlModels.md) | RBAC, ABAC, & PBAC
+1. **One source of truth.** Workday decides who exists; IT never creates an employee by hand.
+2. **Hybrid directories.** MoneyGuard AD serves the physical branch (laptops, Wi-Fi, legacy apps over Kerberos/LDAP); MoneyGuard Entra ID serves everything web-based.
+3. **Centralized authentication.** Applications federate to the IdP with OIDC/SAML instead of storing passwords.
+4. **Layered authorization.** RBAC at the edge for coarse access, ABAC/policy in the service that owns the data.
+5. **Least privilege by default.** Birthright access only, with Just-In-Time elevation for anything privileged.
+6. **Automated lifecycle.** Joiner, Mover, and Leaver events flow from HR with no tickets — and a reconciliation job catches whatever the pipeline drops.
+7. **Everything audited.** Every authentication and sensitive authorization decision lands in the SIEM for Dana and the SOC.
 
-* **RBAC (Role-Based Access Control):** Permissions based on roles (e.g., “Teller”). Good for basic, broad access control.
-* **ABAC (Attribute-Based Access Control):** Permissions based on attributes (e.g., role + location + time of day).
-* **PBAC (Policy-Based Access Control):** Centralized, rule-based authorization (e.g., OPA engine).
-* **Evolution:** Start with RBAC; add ABAC/PBAC for complex scenarios at **MoneyGuard**.
+```mermaid
+graph TD
+    HR[Workday - administrative source of truth]
+    IGA[IGA - governance and provisioning]
+    AD[(MoneyGuard AD - technical source of truth)]
+    ENTRA{MoneyGuard Entra ID - access plane}
+    PORTAL[MoneyGuard Employee Portal]
+    GW[API Gateway - coarse RBAC at the edge]
+    LEDGER[(Core Banking Ledger - fine-grained AuthZ)]
+    FRAUD[Fraud Detection Pipeline - non-human identity]
+    LEGACY[Branch Wi-Fi, laptops, legacy apps]
+    SIEM[MoneyGuard SIEM - Sentinel]
 
-### [04_Principle_of_Least_Privilege_(PoLP).md](./04_Principle_of_Least_Privilege_%28PoLP%29.md) | Security Hardening
-
-* **Rule:** Give users or services only the access they need—and only for the time they need it.
-* **Implementation:** Move from permanent admin access to **Just-In-Time (JIT) access**.
-* **Outcome:** Limits the damage if an account is compromised.
-
-### [05_IAM_Lifecycle.md](./05_IAM_Lifecycle.md) | Joiner, Mover, Leaver (JML)
-
-* **Pipeline:** Automates user access throughout the employee lifecycle.
-* **Joiner:** HR triggers account creation with appropriate access (*Birthright Access*).
-* **Mover:** Detects role changes to prevent **Privilege Creep** (access accumulating unnecessarily).
-* **Leaver:** Automatically revokes all access when someone leaves—acts as a “kill switch.”
-
-### [06_Identity_Repositories.md](./06_Identity_Repositories.md) | The Source of Truth
-
-* **Active Directory (AD DS):** Legacy on-prem solution. Uses LDAP/Kerberos. Organizes users in a hierarchy (OUs).
-* **Azure AD (Entra ID):** Modern cloud solution. Uses OIDC/OAuth/SAML. Flat structure via Graph API.
-* **Architecture Tip:** Use AD for legacy apps, Entra ID for cloud/SaaS apps.
-
----
-
-## 🧠 Chapter 1 Capstone: The "MoneyGuard" Architecture
-
-By the end of this chapter, the high-level design of **MoneyGuard Bank** includes:
-
-1. **Centralized Identity:** Federation Hub (Azure AD/Okta) ensures apps do not manage individual users.
-2. **Lifecycle Automation:** HR (Workday) triggers AD account creation for new employees.
-3. **Access Model:** RBAC for basic roles (e.g., Teller) + ABAC for sensitive actions (location/device checks).
-4. **Audit Trail:** All access requests are logged for regulatory compliance.
-
----
-
-## 💡 Practice Questions (Self-Check)
-
-1. **How does IAM improve enterprise security?**
-   *Short Answer:* It reduces the attack surface by enforcing **Least Privilege** and centralizing control, so a single compromised user cannot jeopardize the whole system.
-
-2. **What is the difference between IAM and PAM?**
-   *Short Answer:*
-
-   * **IAM** manages normal users (Email, Portal, SaaS apps).
-   * **PAM (Privileged Access Management)** protects **super users** (Admins, DBAs, service accounts) using **vaulting** (password rotation) and **session recording**.
-
-3. **Why separate Authentication from Authorization?**
-   *Short Answer:*
-
-   * **Authentication (AuthN)** confirms identity once.
-   * **Authorization (AuthZ)** checks permissions **every request**, ensuring the user is still allowed to perform the action at that moment.
-
----
-
-## 1️ IAM vs PAM Diagram
-
-```
-          ┌───────────────────────┐
-          │      IAM (Identity)   │
-          └───────────────────────┘
-                    │
-          Manages regular users
-       (Email, Portal, SaaS apps)
-                    │
-             Role-Based Access
-                    │
-         -------------------------
-                    │
-          ┌───────────────────────┐
-          │      PAM (Privileged) │
-          └───────────────────────┘
-                    │
-          Manages high-risk accounts
-      (Admins, DBAs, Service Accounts)
-                    │
-         Vaulting + Session Recording
+    HR -->|joiner / mover / leaver events| IGA
+    IGA -->|provision, birthright access| AD
+    AD -->|one-way sync| ENTRA
+    AD <-->|Kerberos / LDAP / RADIUS| LEGACY
+    ENTRA -->|OIDC SSO + MFA| PORTAL
+    ENTRA -->|short-lived tokens| GW
+    FRAUD -->|workload identity token| GW
+    PORTAL --> GW
+    GW --> LEDGER
+    ENTRA --> SIEM
+    GW --> SIEM
+    LEDGER --> SIEM
+    IGA -->|access certification| SIEM
 ```
 
-**Key Idea:**
+## 🔑 The Seven Ideas to Carry Forward
 
-* **IAM** = general users, productivity, day-to-day access
-* **PAM** = privileged users, high-risk, super-sensitive controls
+- Identity is the perimeter — the network no longer is.
+- AuthN happens once per session; AuthZ happens every request.
+- Identity goes in the token; permissions are evaluated at runtime.
+- Start with RBAC, add attributes when context matters, centralize policy when duplication hurts.
+- Least privilege limits blast radius; it does not prevent compromise.
+- The Mover event is where privilege creep is born, and time-to-revoke is the best measure of JML maturity.
+- Machines are identities too — with no MFA, no owner by default, and a lifecycle tied to the application.
 
----
+## ➡️ Where To Next
 
-## 2️ MoneyGuard IAM Lifecycle (Joiner → Mover → Leaver)
-
-```
-           ┌───────────────┐
-           │   Joiner      │
-           │ (New Employee)│
-           └──────┬────────┘
-                  │
-   HR triggers provisioning
-                  │
-           ┌──────┴────────┐
-           │    Mover      │
-           │ (Role Change) │
-           └──────┬────────┘
-                  │
-   Update permissions / prevent
-        privilege creep
-                  │
-           ┌──────┴────────┐
-           │   Leaver      │
-           │ (Exit/Leave)  │
-           └───────────────┘
-                  │
-       Access revoked immediately
-      (No lingering permissions)
-```
-
-**Key Idea:**
-
-* Automation ensures **security and compliance** without relying on manual steps.
-* **Joiner** = get access, **Mover** = adjust access, **Leaver** = remove access instantly.
+- **Module 02 — AuthN & Federation:** how SAML, OAuth 2.0, and OIDC actually work on the wire.
+- **Module 03 — Authorization & Policy Engines:** ReBAC, Google Zanzibar, and OPA in depth.
+- **Module 05 — Identity Lifecycle & SCIM:** the SCIM protocol and sync race conditions.
+- **Module 06 — Machine Identity & Workload Auth:** client credentials, SPIFFE/IRSA, and mTLS.
 
 ---
-
-💡 **Optional Enhancement:**
-We can combine both into **one infographic** showing IAM, PAM, and JML flow together:
-
-* IAM covers all regular users (Joiner → Mover → Leaver).
-* PAM overlays the same flow for privileged accounts with vaulting/session logging.
+⬅ Back to [Main README](../README.md) · Meet the cast in [`SCENARIO.md`](../SCENARIO.md)
+Start reading: [Chapter 1 — What Is IAM?](./01_What_Is_IAM.md) ➡
