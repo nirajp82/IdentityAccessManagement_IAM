@@ -50,5 +50,3 @@ For a **Staff Software Engineer – IAM interview**, the interviewer usually exp
 * **Prefer BFF for SPAs when possible**
 
 ---
-
-✅ If you want, I can also give you **5 IAM interview answers that staff-level candidates use** (things like **token validation, JWKS rotation, introspection, federation, SAML vs OIDC**) that **impress interviewers immediately**.
