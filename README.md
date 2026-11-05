@@ -1,5 +1,7 @@
 # 🔐 Identity & Access Management (IAM) — The Complete Field Guide
 
+## https://identiflows.dev/ - A Visual Reference for Identity Flows
+
 A from-scratch, beginner-friendly course on Identity & Access Management — the concepts, protocols, and system-design tradeoffs a Software/Staff Engineer is expected to know. It's written as personal study notes and reference material, organized so it's still useful when you come back to it in six months.
 
 Every chapter teaches its concept through **one running example** instead of a different toy company each time. Read **[`SCENARIO.md`](./SCENARIO.md)** first — it introduces **MoneyGuard Bank**, the cast of characters (Priya, Raj, Dana, Alex, Sam, and the attacker Eve), and the systems they use. Once you know that cast, every chapter in every module speaks the same language.
@@ -9,6 +11,8 @@ Every chapter teaches its concept through **one running example** instead of a d
 The course is split into **11 numbered modules**, each its own folder with a `README.md` index and a set of numbered chapters (`01_...md`, `02_...md`, ...). Modules build on each other roughly in order — Module 01 assumes nothing, Module 11 assumes you've read everything before it — but each module's `README.md` also says what it builds on and what it feeds into, so you can jump around.
 
 Every standard chapter (Modules 01–10) follows the same template: **Overview → Why This Matters → Key Concepts → Detailed Notes → Workflow → Architecture Diagram → Step-by-Step Process → Commands and Examples → Best Practices → Common Mistakes → Pro Tips → Real-World Use Cases → Key Takeaways → Glossary → Revision Notes → Interview Questions → Practice Exercises**. Module 11 is the capstone and deliberately breaks that mold — it's a whiteboard framework, a full architecture walkthrough, and a bank of interview Q&A and exercises.
+
+
 
 ## 📖 Table of Contents
 
